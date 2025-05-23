@@ -1,3 +1,17 @@
+"""
+Objective: Find Point to Point Distance and Time for each FOV
+There are 3 components to this problem:
+1. Find the distance travelled by the source for each projection and then find the time taken to travel that distance.
+2. Find total time taken to capture the image for each projection. 
+1&2. Scan time per FOV (for all projections)
+3. Find the total time taken to move from one FOV to another.
+board movement timing with multi-axis synchronization
+
+Set Bottom-Left Corner as the origin (0,0).
+
+Assume S-curve velocity profile for the source with jerk properties.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -11,9 +25,9 @@ PROJ = 32
 EXPO = 0.050  # seconds   50ms
 
 def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000):
-    t_j = a_max / j_max
-    t_const_a = (v_max - a_max * t_j) / a_max
-    s_accel = j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2
+    t_j = a_max / j_max # time to reach max acceleration
+    t_const_a = (v_max - a_max * t_j) / a_max #time at constant acceleration
+    s_accel = 1/3 * j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2
     s_total_accel_decel = 2 * s_accel
     print(f"t_j = {t_j:.5f} s, t_const_a = {t_const_a:.5f} s")
     print(f"s_accel = {s_accel:.5f} nm, s_total_accel_decel = {s_total_accel_decel:.5f} nm")
@@ -111,19 +125,44 @@ def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000):
 # Scan time per FOV (for all projections)
 def calculate_scan_time(verbose=False):
     scan_times = 0
+    dist = 2 * PI * R / PROJ
     for i in range(PROJ):
-        dist = 2 * PI * R / PROJ
         time,_ = calculate_travel_time(dist, VELOCITY, ACCELERATION, JERK)
         scan_times += EXPO + time
         if verbose:
             print(f"  [Scan {i:02d}] Arc Dist = {dist:.1f} nm, Travel = {time:.5f}s, Total = {EXPO + time:.5f}s")
     return scan_times
 
-# Euclidean distance
-def calculate_euclidean_distance(pt1, pt2):
-    return np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
+# Multi-axis time normalization (X and Y)
+def synchronize_multi_axis_motion(p1, p2):
+    dx = abs(p2[0] - p1[0])
+    dy = abs(p2[1] - p1[1])
 
-# Detailed board movement timing
+    t_x, _ = calculate_travel_time(dx, VELOCITY, ACCELERATION, JERK)
+    t_y, _ = calculate_travel_time(dy, VELOCITY, ACCELERATION, JERK)
+
+    t_sync = max(t_x, t_y)
+
+    # Scale jerk, accel, velocity for each axis
+    def scale_params(t_i):
+        if t_i == 0:
+            return JERK, ACCELERATION, VELOCITY  # no motion on this axis
+        scale = (t_i / t_sync)
+        j = JERK * scale**3
+        a = ACCELERATION * scale**2
+        v = VELOCITY * scale
+        return j, a, v
+
+    j_x, a_x, v_x = scale_params(t_x)
+    j_y, a_y, v_y = scale_params(t_y)
+
+    return {
+        't_sync': t_sync,
+        'x': {'dist': dx, 'jerk': j_x, 'accel': a_x, 'vel': v_x},
+        'y': {'dist': dy, 'jerk': j_y, 'accel': a_y, 'vel': v_y},
+    }
+
+# Updated board movement timing with multi-axis synchronization
 def calculate_board_movement_time(rectangles):
     ptp_times = 0
     scan_times = calculate_scan_time(verbose=True)
@@ -132,14 +171,14 @@ def calculate_board_movement_time(rectangles):
     for i in range(1, len(rectangles)):
         prev = (rectangles[i - 1]['cx'], rectangles[i - 1]['cy'])
         curr = (rectangles[i]['cx'], rectangles[i]['cy'])
-        dist = calculate_euclidean_distance(prev, curr)
-        plot_velocity_profile(dist)
-        travel_time,_ = calculate_travel_time(dist, VELOCITY, ACCELERATION, JERK)
-        segment_time = travel_time + scan_times
+        sync = synchronize_multi_axis_motion(prev, curr)
+        max_dist = max(sync['x']['dist'], sync['y']['dist'])
+        plot_velocity_profile(max_dist)
+
+        segment_time = sync['t_sync'] + scan_times
 
         print(f"[FOV {i}] Move from {prev} to {curr}")
-        print(f"         Distance = {dist:.1f} nm")
-        print(f"         Travel   = {travel_time:.5f} s")
+        print(f"         Travel   = {sync['t_sync']:.5f} s")
         print(f"         Scan     = {scan_times:.5f} s")
         print(f"         Segment  = {segment_time:.5f} s\n")
 
@@ -148,28 +187,6 @@ def calculate_board_movement_time(rectangles):
     print(f"Total Movement + Scan Time = {ptp_times:.3f} seconds")
     return ptp_times
 
-def plot_fov_path(rectangles):
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    for i, rect in enumerate(rectangles):
-        x, y = rect['cx'], rect['cy']
-        ax.plot(x, y, 'bo')  # Point for FOV center
-        ax.text(x, y + 5_000_000, f"FOV {i}", fontsize=9, ha='center', color='blue')
-
-        if i > 0:
-            prev_x, prev_y = rectangles[i - 1]['cx'], rectangles[i - 1]['cy']
-            ax.annotate("",
-                        xy=(x, y),
-                        xytext=(prev_x, prev_y),
-                        arrowprops=dict(arrowstyle="->", color='red'))
-
-    ax.set_title("FOV Movement Path")
-    ax.set_xlabel("X Position (nm)")
-    ax.set_ylabel("Y Position (nm)")
-    ax.grid(True)
-    ax.set_aspect('equal', adjustable='box')
-    plt.tight_layout()
-    plt.show()
 
 def plot_velocity_profile(distance):
     t_total, profile = calculate_travel_time(distance, VELOCITY, ACCELERATION, JERK)
@@ -185,6 +202,7 @@ def plot_velocity_profile(distance):
     plt.show()
 
 
+
 # --- TESTING ---
 
 mock_rectangles = [ 
@@ -193,13 +211,10 @@ mock_rectangles = [
     {'cx': 100_000_000, 'cy': 100_000_000},
     {'cx': 200_000_000, 'cy': 100_000_000}
     ]
-    
+
 
 if __name__ == "__main__":
-    # calculate_board_movement_time(mock_rectangles)
-    plot_fov_path(mock_rectangles)
+    calculate_board_movement_time(mock_rectangles)
 
-    arc_distance = 1000_000_000
-    plot_velocity_profile(arc_distance)
-
-
+    # arc_distance = 1000_000_000
+    # plot_velocity_profile(arc_distance)
