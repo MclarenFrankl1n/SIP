@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 ACCELERATION = 5_000_000_000  # nm/s²
 VELOCITY = 1_000_000_000      # nm/s
 JERK = 100_000_000_000          # nm/s³
-PI = 3.141592653589793
+PI = np.pi
 R = 50_000_000                # nm    5cm
 PROJ = 32
 EXPO = 0.050  # seconds   50ms
