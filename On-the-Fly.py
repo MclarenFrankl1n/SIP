@@ -25,7 +25,7 @@ PI = np.pi
 R = 50_000_000                # nm    5cm
 PROJ = 32
 EXPO = 0.050  # seconds   50ms
-CYCLE_TIME = 10.00  # seconds   10s
+CYCLE_TIME = 1.6  # seconds   10s
 
 def calculate_maximum_velocity(radius, CycleTime):
     """
@@ -60,7 +60,7 @@ def calculate_ramp_up_down_time(velocity, acceleration, jerk):
     t_j = acceleration / jerk  # time to reach max acceleration
     t_const_a = (velocity - acceleration * t_j) / acceleration  # time at constant acceleration
     ramp_up_time = 2 * t_j + t_const_a  # total ramp-up time
-    ramp_down_time = ramp_up_time  # symmetric profile
+    ramp_down_time = ramp_up_time  # assuming symmetry
     print(f"Ramp-up Time = {ramp_up_time:.5f} s, Ramp-down Time = {ramp_down_time:.5f} s")
     return ramp_up_time, ramp_down_time
 
