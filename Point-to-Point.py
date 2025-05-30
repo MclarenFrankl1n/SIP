@@ -1,7 +1,8 @@
 """
+First Method: Stop and Go
 Objective: Find Point to Point Distance and Time for each FOV
 There are 3 components to this problem:
-1. Find the distance travelled by the source for each projection and then find the time taken to travel that distance.
+1. Find the distance travelled and time taken by the source for each projection.
 2. Find total time taken to capture the image for each projection. 
 1&2. Scan time per FOV (for all projections)
 3. Find the total time taken to move from one FOV to another.
@@ -201,45 +202,6 @@ def plot_velocity_profile(distance):
     plt.tight_layout()
     plt.show()
 
-def calculate_circular_motion_time(
-    radius_nm,
-    number_of_cycles,
-    number_of_projection,
-    sample_trigger_count=2,
-    acceleration=ACCELERATION,
-    velocity=VELOCITY,
-    jerk=JERK,
-    expo=EXPO,
-    verbose=False
-):
-    """
-    Calculate total time for circular scan motion, similar to the C++ implementation.
-    """
-    # Calculate ramping angle (simplified, as in C++ it's based on acceleration profile)
-    # For most cases, ramping angle is small, so we can approximate with 0 for now.
-    ramping_angle_rad = 0.1
-
-    # Arc length in degrees (from C++ logic)
-    arc_length_deg = (2.0 * ramping_angle_rad * 180.0 / PI) \
-        + ((360.0 / number_of_projection) * (sample_trigger_count - 1)) \
-        + (number_of_cycles * 360.0)
-
-    # Convert arc length in degrees to radians
-    arc_length_rad = arc_length_deg * PI / 180.0
-
-    # Arc distance in nm
-    arc_distance_nm = radius_nm * arc_length_rad
-
-    # Calculate travel time for the arc
-    travel_time, _ = calculate_travel_time(arc_distance_nm, velocity, acceleration, jerk)
-
-    total_time = travel_time + expo  # add exposure time
-
-    if verbose:
-        print(f"Arc length: {arc_length_deg:.2f} deg, Arc distance: {arc_distance_nm:.2f} nm")
-        print(f"Travel time: {travel_time:.5f} s, Exposure: {expo:.5f} s, Total: {total_time:.5f} s")
-
-    return total_time
 
 
 # --- TESTING ---
@@ -255,14 +217,5 @@ mock_rectangles = [
 if __name__ == "__main__":
     calculate_board_movement_time(mock_rectangles)
 
-    # Example usage for a single FOV
-    total_time = calculate_circular_motion_time(
-        radius_nm=R,
-        number_of_cycles=1,
-        number_of_projection=PROJ,
-        sample_trigger_count=1,
-        verbose=True
-    )
-    print(f"Total circular scan time: {total_time:.3f} seconds")
-    # arc_distance = 1000_000_000
-    # plot_velocity_profile(arc_distance)
+    arc_distance = 1000_000_000
+    plot_velocity_profile(arc_distance)
