@@ -64,6 +64,23 @@ def calculate_ramp_up_down_time(velocity, acceleration, jerk):
     print(f"Ramp-up Time = {ramp_up_time:.5f} s, Ramp-down Time = {ramp_down_time:.5f} s")
     return ramp_up_time, ramp_down_time
 
+def calculate_triangular_ramp_time(v_target, j_max):
+    """
+    Compute ramp-up and ramp-down time assuming triangular motion profile.
+    (No constant acceleration, just jerk up and down)
+    
+    Parameters:
+    - v_target: Target cruise velocity [nm/s]
+    - j_max: Maximum jerk [nm/s³]
+
+    Returns:
+    - t_ramp: Time to ramp up or ramp down [s]
+    - s_ramp: Distance traveled during the ramp phase [nm]
+    """
+    t_j = (v_target / j_max) ** (1/2)  # From v = (1/2)*j*t^2 => t = sqrt(2v/j)
+    s_ramp = (1/3) * j_max * t_j**3   # Total distance covered during ramp phase
+    print(f"Triangular Ramp: t_j = {t_j:.5f} s, s_ramp = {s_ramp:.1f} nm")
+    return t_j * 2, s_ramp  # Total ramp time (jerk up + down)
 
 
 # --- TESTING ---
@@ -80,4 +97,9 @@ mock_rectangles = [
 if __name__ == "__main__":
     JERK, ACCELERATION, VELOCITY = calculate_maximum_velocity(R, CYCLE_TIME)
     print(f"Using: JERK={JERK:.2e}, ACCELERATION={ACCELERATION:.2e}, VELOCITY={VELOCITY:.2e}")
+
+    print("\n--- S-Curve Ramp ---")
     calculate_ramp_up_down_time(VELOCITY, ACCELERATION, JERK)
+
+    print("\n--- Triangular Ramp ---")
+    calculate_triangular_ramp_time(VELOCITY, JERK)
