@@ -25,13 +25,14 @@ R = 50_000_000                # nm    5cm
 PROJ = 32
 EXPO = 0.050  # seconds   50ms
 
-def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000):
+def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbose=False):
     t_j = a_max / j_max # time to reach max acceleration
     t_const_a = (v_max - a_max * t_j) / a_max #time at constant acceleration
     s_accel = 1/3 * j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2
     s_total_accel_decel = 2 * s_accel
-    print(f"t_j = {t_j:.5f} s, t_const_a = {t_const_a:.5f} s")
-    print(f"s_accel = {s_accel:.5f} nm, s_total_accel_decel = {s_total_accel_decel:.5f} nm")
+    if verbose:
+        print(f"t_j = {t_j:.5f} s, t_const_a = {t_const_a:.5f} s")
+        print(f"s_accel = {s_accel:.5f} nm, s_total_accel_decel = {s_total_accel_decel:.5f} nm")
 
     if distance < s_total_accel_decel:
         # Triangular motion profile
@@ -39,7 +40,8 @@ def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000):
         t_total = 4 * t_j
         t_vals = np.linspace(0, t_total, resolution)
         v_vals = np.zeros_like(t_vals)
-        print("Triangular Profile")
+        if verbose:
+            print("Triangular Profile")
 
         t1 = t_j
         t2 = 2 * t_j
@@ -73,7 +75,8 @@ def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000):
         t_total = 2 * t_j + t_const_a + t_cruise + 2 * t_j + t_const_a
         t_vals = np.linspace(0, t_total, resolution)
         v_vals = np.zeros_like(t_vals)
-        print("S-Curve Profile")
+        if verbose:
+            print("S-Curve Profile")
 
         # Define phase boundaries
         t1 = t_j
@@ -134,7 +137,7 @@ def calculate_scan_time(verbose=False):
             print(f"  [Scan {i:02d}] Arc Dist = {dist:.1f} nm, Travel = {time:.5f}s, Total = {EXPO + time:.5f}s")
     return scan_times
 
-# Multi-axis time normalization (X and Y)
+# Multi-axis time normalization (P1, P2, Pn)
 def synchronize_multi_axis_motion(p1, p2):
     dx = abs(p2[0] - p1[0])
     dy = abs(p2[1] - p1[1])
@@ -143,6 +146,8 @@ def synchronize_multi_axis_motion(p1, p2):
     t_y, _ = calculate_travel_time(dy, VELOCITY, ACCELERATION, JERK)
 
     t_sync = max(t_x, t_y)
+    sync_axis = 'X' if t_x >= t_y else 'Y'
+    print(f"Sync axis: {sync_axis} (t_x={t_x:.5f} s, t_y={t_y:.5f} s)")
 
     # Scale jerk, accel, velocity for each axis
     def scale_params(t_i):
@@ -159,6 +164,7 @@ def synchronize_multi_axis_motion(p1, p2):
 
     return {
         't_sync': t_sync,
+        'sync_axis': sync_axis,
         'x': {'dist': dx, 'jerk': j_x, 'accel': a_x, 'vel': v_x},
         'y': {'dist': dy, 'jerk': j_y, 'accel': a_y, 'vel': v_y},
     }
@@ -166,7 +172,7 @@ def synchronize_multi_axis_motion(p1, p2):
 # Updated board movement timing with multi-axis synchronization
 def calculate_board_movement_time(rectangles):
     ptp_times = 0
-    scan_times = calculate_scan_time(verbose=True)
+    scan_times = calculate_scan_time(verbose=False)
     print(f"\n[Scan Time Per FOV] = {scan_times:.5f} seconds\n")
 
     for i in range(1, len(rectangles)):
@@ -207,10 +213,11 @@ def plot_velocity_profile(distance):
 # --- TESTING ---
 
 mock_rectangles = [ 
-    {'cx': 0, 'cy': 0},
-    {'cx': 100_000_000, 'cy': 0},
-    {'cx': 100_000_000, 'cy': 100_000_000},
-    {'cx': 200_000_000, 'cy': 100_000_000}
+    {'cx': 0, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
+    {'cx': 100_000_000, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
+    {'cx': 100_000_000, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
+    {'cx': 0, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
+    {'cx': 0, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000}
     ]
 
 
