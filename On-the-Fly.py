@@ -21,6 +21,10 @@ import matplotlib.pyplot as plt
 ACCELERATION = 5_000_000_000  # nm/s²
 VELOCITY = 1_000_000_000      # nm/s
 JERK = 100_000_000_000          # nm/s³
+# Defaults for Source Detector
+VELOCITY_S = 1_000_000      # 1 mm/s
+ACCELERATION_S = 100_000_000  # 0.1 m/s²
+JERK_S = 1_000_000_000        # 1 m/s³
 PI = np.pi
 R = 50_000_000                # nm    5cm
 PROJ = 32
@@ -100,8 +104,8 @@ def calculate_triangular_ramp_up_down_time(v_target, j_max):
 # Scan time per FOV (for all projections)
 def calculate_scan_time(verbose=False):
     # Use updated velocity, acceleration, and jerk that match cycle time
-    JERK, ACCELERATION, VELOCITY = calculate_maximum_velocity(R, CYCLE_TIME)
-    ramp_up_time, ramp_down_time = calculate_ramp_up_down_time(VELOCITY, ACCELERATION, JERK)
+    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(R, CYCLE_TIME)
+    ramp_up_time, ramp_down_time = calculate_ramp_up_down_time(VELOCITY_S, ACCELERATION_S, JERK_S)
     scan_times = (EXPO * PROJ) + ramp_up_time + ramp_down_time
     if verbose:
         print(f"Total scan time for {PROJ} projections: {scan_times:.5f} seconds")
