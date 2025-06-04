@@ -49,6 +49,7 @@ def calculate_maximum_velocity(radius, CycleTime):
         return J, A, V
 
     JERK_S, ACCELERATION_S, VELOCITY_S = scale_params(JERK, ACCELERATION, VELOCITY)
+    print(f"Using: JERK={JERK:.2e}, ACCELERATION={ACCELERATION:.2e}, VELOCITY={VELOCITY:.2e}")
     return JERK_S, ACCELERATION_S, VELOCITY_S
 
 def calculate_ramp_up_down_time(velocity, acceleration, jerk):
@@ -64,7 +65,7 @@ def calculate_ramp_up_down_time(velocity, acceleration, jerk):
         t_const_a = 0  # If negative, profile is triangular
     ramp_up_time = 2 * t_j + t_const_a  # total ramp-up time
     ramp_down_time = ramp_up_time  # assuming symmetry
-
+    print("\n--- S-Curve Ramp ---")
     print(f"Jerk-up time (t_j): {t_j:.5f} s")
     print(f"Constant acceleration time (t_const_a): {t_const_a:.5f} s")
     print(f"Jerk-down time (t_j): {t_j:.5f} s")
@@ -98,6 +99,8 @@ def calculate_triangular_ramp_up_down_time(v_target, j_max):
 
 # Scan time per FOV (for all projections)
 def calculate_scan_time(verbose=False):
+    # Use updated velocity, acceleration, and jerk that match cycle time
+    JERK, ACCELERATION, VELOCITY = calculate_maximum_velocity(R, CYCLE_TIME)
     ramp_up_time, ramp_down_time = calculate_ramp_up_down_time(VELOCITY, ACCELERATION, JERK)
     scan_times = (EXPO * PROJ) + ramp_up_time + ramp_down_time
     if verbose:
@@ -207,17 +210,26 @@ def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbos
     
 # Multi-axis time normalization (P1, P2, Pn)
 def synchronize_multi_axis_motion(p1, p2):
-    dx = abs(p2[0] - p1[0])
-    dy = abs(p2[1] - p1[1])
+    """
+    Synchronize multi-axis motion for any number of axes.
+    Returns the sync axis, sync time, and scaled parameters for each axis.
+    """
+    n_axes = len(p1)
+    distances = [abs(p2[i] - p1[i]) for i in range(n_axes)]
+    times = []
+    params = []
 
-    t_x, _ = calculate_travel_time(dx, VELOCITY, ACCELERATION, JERK)
-    t_y, _ = calculate_travel_time(dy, VELOCITY, ACCELERATION, JERK)
+    for dist in distances:
+        t, _ = calculate_travel_time(dist, VELOCITY, ACCELERATION, JERK)
+        times.append(t)
 
-    t_sync = max(t_x, t_y)
-    sync_axis = 'X' if t_x >= t_y else 'Y'
-    print(f"Sync axis: {sync_axis} (t_x={t_x:.5f} s, t_y={t_y:.5f} s)")
+    t_sync = max(times)
+    sync_axis_idx = times.index(t_sync)
+    sync_axis = f"Axis{sync_axis_idx}"
 
-    # Scale jerk, accel, velocity for each axis
+    axis_labels = [f"Axis{i}" for i in range(n_axes)]
+    print(f"Sync axis: {sync_axis} ({', '.join([f't_{axis_labels[i]}={t:.5f} s' for i, t in enumerate(times)])})")
+
     def scale_params(t_i):
         if t_i == 0:
             return JERK, ACCELERATION, VELOCITY  # no motion on this axis
@@ -227,15 +239,22 @@ def synchronize_multi_axis_motion(p1, p2):
         v = VELOCITY * scale
         return j, a, v
 
-    j_x, a_x, v_x = scale_params(t_x)
-    j_y, a_y, v_y = scale_params(t_y)
+    for t_i in times:
+        params.append(scale_params(t_i))
 
-    return {
+    # Build result dictionary
+    result = {
         't_sync': t_sync,
         'sync_axis': sync_axis,
-        'x': {'dist': dx, 'jerk': j_x, 'accel': a_x, 'vel': v_x},
-        'y': {'dist': dy, 'jerk': j_y, 'accel': a_y, 'vel': v_y},
     }
+    for i in range(n_axes):
+        result[f"axis_{i}"] = {
+            'dist': distances[i],
+            'jerk': params[i][0],
+            'accel': params[i][1],
+            'vel': params[i][2],
+        }
+    return result
 
 # Updated board movement timing with multi-axis synchronization
 def calculate_board_movement_time(rectangles):
@@ -244,10 +263,11 @@ def calculate_board_movement_time(rectangles):
     print(f"\n[Scan Time Per FOV] = {scan_times:.5f} seconds\n")
 
     for i in range(1, len(rectangles)):
-        prev = (rectangles[i - 1]['cx'], rectangles[i - 1]['cy'])
-        curr = (rectangles[i]['cx'], rectangles[i]['cy'])
+        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
+        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
+        curr = tuple(rectangles[i][k] for k in axis_keys)
         sync = synchronize_multi_axis_motion(prev, curr)
-        max_dist = max(sync['x']['dist'], sync['y']['dist'])
+        max_dist = max(sync[f'axis_{j}']['dist'] for j in range(len(prev)))
         plot_velocity_profile(max_dist)
 
         segment_time = sync['t_sync'] + scan_times
@@ -278,8 +298,8 @@ def plot_velocity_profile(distance):
 # --- TESTING ---
 
 mock_rectangles = [ 
-    {'cx': 0, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 100_000_000, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
+    {'cx': 1000, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
+    {'cx': 100_000_000, 'cy': 20, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
     {'cx': 100_000_000, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
     {'cx': 0, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
     {'cx': 0, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000}
@@ -287,16 +307,7 @@ mock_rectangles = [
 
 
 if __name__ == "__main__":
-    print("\n--- Triangular Ramp ---")
-    calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
-
-    JERK, ACCELERATION, VELOCITY = calculate_maximum_velocity(R, CYCLE_TIME)
-    print(f"Using: JERK={JERK:.2e}, ACCELERATION={ACCELERATION:.2e}, VELOCITY={VELOCITY:.2e}")
-
-    print("\n--- S-Curve Ramp ---")
-    calculate_ramp_up_down_time(VELOCITY, ACCELERATION, JERK)
-
-    print("\n--- Triangular Ramp ---")
-    calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
+    # print("\n--- Triangular Ramp ---")
+    # calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
 
     calculate_board_movement_time(mock_rectangles)
