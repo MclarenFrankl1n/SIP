@@ -16,9 +16,12 @@ Though moving from one FOV to another, it might be triangular motion profile.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import csv
 
+#parabolic motion profile
+# make sure everything is variable input
 # Constants
-ACCELERATION = 5_000_000_000  # nm/s²
+ACCELERATION = 5_000_000_000  # nm/s²   for para x2/3 for average
 VELOCITY = 1_000_000_000      # nm/s
 JERK = 100_000_000_000          # nm/s³
 # Defaults for Source Detector
@@ -53,7 +56,7 @@ def calculate_maximum_velocity(radius, CycleTime):
         return J, A, V
 
     JERK_S, ACCELERATION_S, VELOCITY_S = scale_params(JERK, ACCELERATION, VELOCITY)
-    print(f"Using: JERK={JERK:.2e}, ACCELERATION={ACCELERATION:.2e}, VELOCITY={VELOCITY:.2e}")
+    print(f"Using: JERK={JERK_S:.2e}, ACCELERATION={ACCELERATION_S:.2e}, VELOCITY={VELOCITY_S:.2e}")
     return JERK_S, ACCELERATION_S, VELOCITY_S
 
 def calculate_ramp_up_down_time(velocity, acceleration, jerk):
@@ -271,6 +274,8 @@ def calculate_board_movement_time(rectangles):
         prev = tuple(rectangles[i - 1][k] for k in axis_keys)
         curr = tuple(rectangles[i][k] for k in axis_keys)
         sync = synchronize_multi_axis_motion(prev, curr)
+
+        # Plot velocity profile for the greatest distance of all axes for board movement
         max_dist = max(sync[f'axis_{j}']['dist'] for j in range(len(prev)))
         plot_velocity_profile(max_dist)
 
@@ -301,6 +306,7 @@ def plot_velocity_profile(distance):
 
 # --- TESTING ---
 
+# 6 axis, make this a list
 mock_rectangles = [ 
     {'cx': 1000, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
     {'cx': 100_000_000, 'cy': 20, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
@@ -310,8 +316,25 @@ mock_rectangles = [
     ]
 
 
+def load_FOV_from_csv(filename):
+    """
+    Load rectangles (positions) from a CSV file.
+    Each row should have columns like: cx, cy, cz, cw, ch, ...
+    Returns a list of dictionaries.
+    """
+    rectangles = []
+    with open(filename, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            # Convert all values to int (or float if needed)
+            rect = {k: int(v) for k, v in row.items()}
+            rectangles.append(rect)
+    return rectangles
+
+
 if __name__ == "__main__":
     # print("\n--- Triangular Ramp ---")
     # calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
 
-    calculate_board_movement_time(mock_rectangles)
+    rectangles = load_FOV_from_csv('FOV.csv')
+    calculate_board_movement_time(rectangles)

@@ -15,6 +15,7 @@ Assume S-curve velocity profile for the source with jerk properties.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import csv
 
 # Constants
 ACCELERATION = 5_000_000_000  # nm/s²
@@ -225,6 +226,20 @@ def plot_velocity_profile(distance):
     plt.tight_layout()
     plt.show()
 
+def load_FOV_from_csv(filename):
+    """
+    Load rectangles (positions) from a CSV file.
+    Each row should have columns like: cx, cy, cz, cw, ch, ...
+    Returns a list of dictionaries.
+    """
+    rectangles = []
+    with open(filename, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            # Convert all values to int (or float if needed)
+            rect = {k: int(v) for k, v in row.items()}
+            rectangles.append(rect)
+    return rectangles
 
 
 # --- TESTING ---
@@ -239,7 +254,8 @@ mock_rectangles = [
 
 
 if __name__ == "__main__":
-    calculate_board_movement_time(mock_rectangles)
+    rectangles = load_FOV_from_csv('FOV.csv')
+    calculate_board_movement_time(rectangles)
 
     # arc_distance = 1000_000_000
     # plot_velocity_profile(arc_distance)
