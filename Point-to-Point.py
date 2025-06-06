@@ -245,15 +245,6 @@ def load_FOV_from_csv(filename):
 
 # --- TESTING ---
 
-mock_rectangles = [ 
-    {'cx': 1000, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 100_000_000, 'cy': 20, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 100_000_000, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 0, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 0, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000}
-    ]
-
-
 if __name__ == "__main__":
     rectangles = load_FOV_from_csv('FOV.csv')
     calculate_board_movement_time(rectangles)
