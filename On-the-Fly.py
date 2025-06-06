@@ -345,12 +345,15 @@ def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefi
         t_offset = t[-1]
         s_offset = s[-1]
 
-        # Always add scan phase after every move
-        t_scan = np.linspace(0, scan_times, 500)[1:] + t_offset
-        v_scan = np.ones_like(t_scan) * VELOCITY
-        s_scan = np.linspace(0, VELOCITY * scan_times, 500)[1:] + s_offset
-        a_scan = np.zeros_like(t_scan)
-        j_scan = np.zeros_like(t_scan)
+        # Use the correct scan velocity, acceleration, and jerk for scan phase
+        JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(radius=105_770_000, CycleTime=CYCLE_TIME)
+        distance_scan = VELOCITY_S * scan_times
+        t_scan_rel, profile_scan = calculate_travel_time(distance_scan, VELOCITY_S, ACCELERATION_S, JERK_S)
+        t_scan = profile_scan['t'] + t_offset
+        v_scan = profile_scan['v']
+        s_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + s_offset
+        a_scan = np.gradient(v_scan, t_scan)
+        j_scan = np.gradient(a_scan, t_scan)
 
         t_all.append(t_scan)
         s_all.append(s_scan)
@@ -438,7 +441,7 @@ def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefi
     plt.savefig(f"{save_prefix}_normalized.png")  # Save the normalized overlay
     plt.show()
 
-def plot_scan_phase(scan_time, velocity=VELOCITY, acceleration=ACCELERATION, jerk=JERK, time_range=None, save_prefix='scan_phase'):
+def plot_scan_phase(scan_time, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S, time_range=None, save_prefix='scan_phase'):
     """
     Plot position, velocity, acceleration, and jerk for a scan phase
     including ramp-up, constant velocity, and ramp-down.
@@ -526,8 +529,9 @@ if __name__ == "__main__":
     # calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
 
     rectangles = load_FOV_from_csv('FOV.csv')
+    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(radius=105_770_000, CycleTime=CYCLE_TIME)
     calculate_board_movement_time(rectangles)
     scan_times = calculate_scan_time(radius=105_770_000, verbose=True)  # or whatever radius you use
     plot_full_motion_profile(rectangles, scan_times)  # View only the first 2 seconds
     scan_times = calculate_scan_time(radius=105_770_000, verbose=True)
-    plot_scan_phase(scan_times)  # View only the first 2 seconds
+    plot_scan_phase(scan_times, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S)
