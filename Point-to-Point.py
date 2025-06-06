@@ -128,9 +128,9 @@ def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbos
 
 
 # Scan time per FOV (for all projections)
-def calculate_scan_time(verbose=False):
+def calculate_scan_time(radius, verbose=False):
     scan_times = 0
-    dist = 2 * PI * R / PROJ
+    dist = 2 * PI * radius / PROJ
     for i in range(PROJ):
         time,_ = calculate_travel_time(dist, VELOCITY, ACCELERATION, JERK)
         scan_times += EXPO + time
@@ -189,7 +189,8 @@ def synchronize_multi_axis_motion(p1, p2):
 # Updated board movement timing with multi-axis synchronization
 def calculate_board_movement_time(rectangles):
     ptp_times = 0
-    scan_times = calculate_scan_time(verbose=False)
+    radius = 105_770_000
+    scan_times = calculate_scan_time(radius, verbose=False)
     print(f"\n[Scan Time Per FOV] = {scan_times:.5f} seconds\n")
 
     for i in range(1, len(rectangles)):
