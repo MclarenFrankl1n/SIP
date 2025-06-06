@@ -306,6 +306,105 @@ def plot_velocity_profile(distance):
     plt.tight_layout()
     plt.show()
 
+
+def plot_full_motion_profile(rectangles, scan_times):
+    """
+    Plot the full motion profile (position, velocity, acceleration, jerk)
+    for the entire sequence of FOV moves and scans, all on one plot.
+    Also labels scan and move phases.
+    """
+    t_all = []
+    s_all = []
+    v_all = []
+    a_all = []
+    j_all = []
+    phase_types = []  # 'move' or 'scan'
+    t_offset = 0
+    s_offset = 0
+
+    for i in range(1, len(rectangles)):
+        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
+        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
+        curr = tuple(rectangles[i][k] for k in axis_keys)
+        sync = synchronize_multi_axis_motion(prev, curr)
+        max_dist = max(sync[f'axis_{j}']['dist'] for j in range(len(prev)))
+        t_total, profile = calculate_travel_time(max_dist, VELOCITY, ACCELERATION, JERK)
+        t = profile['t'] + t_offset
+        v = profile['v']
+        s = np.cumsum(v) * (t[1] - t[0]) + s_offset
+        a = np.gradient(v, t)
+        j_ = np.gradient(a, t)
+
+        t_all.append(t)
+        s_all.append(s)
+        v_all.append(v)
+        a_all.append(a)
+        j_all.append(j_)
+        phase_types.append(('move', t[0], t[-1]))
+
+        t_offset = t[-1]
+        s_offset = s[-1]
+
+        # Only add scan phase if not the last FOV
+        for i in range(1, len(rectangles)):
+            # ... your move code ...
+            t_all.append(t)
+            s_all.append(s)
+            v_all.append(v)
+            a_all.append(a)
+            j_all.append(j_)
+            phase_types.append(('move', t[0], t[-1]))
+
+            t_offset = t[-1]
+            s_offset = s[-1]
+
+            # Always add scan phase after every move
+            t_scan = np.linspace(0, scan_times, 500)[1:] + t_offset
+            v_scan = np.ones_like(t_scan) * VELOCITY
+            s_scan = np.linspace(0, VELOCITY * scan_times, 500)[1:] + s_offset
+            a_scan = np.zeros_like(t_scan)
+            j_scan = np.zeros_like(t_scan)
+
+            t_all.append(t_scan)
+            s_all.append(s_scan)
+            v_all.append(v_scan)
+            a_all.append(a_scan)
+            j_all.append(j_scan)
+            phase_types.append(('scan', t_scan[0], t_scan[-1]))
+
+            t_offset = t_scan[-1]
+            s_offset = s_scan[-1]
+
+    # Concatenate all segments
+    t_full = np.concatenate(t_all)
+    s_full = np.concatenate(s_all)
+    v_full = np.concatenate(v_all)
+    a_full = np.concatenate(a_all)
+    j_full = np.concatenate(j_all)
+
+    plt.figure(figsize=(14, 6))
+    plt.plot(t_full, s_full, label="Position (nm)", color='blue')
+    plt.plot(t_full, v_full, label="Velocity (nm/s)", color='orange')
+    plt.plot(t_full, a_full, label="Acceleration (nm/s²)", color='green')
+    plt.plot(t_full, j_full, label="Jerk (nm/s³)", color='red')
+
+    # Shade scan and move phases
+    ax = plt.gca()
+    for phase, t_start, t_end in phase_types:
+        if phase == 'scan':
+            ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label='Scan Phase' if 'Scan Phase' not in ax.get_legend_handles_labels()[1] else "")
+        else:
+            ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label='Move Phase' if 'Move Phase' not in ax.get_legend_handles_labels()[1] else "")
+
+    plt.xlabel("Time (s)")
+    plt.title("Full Motion Profile (All FOVs)")
+    plt.legend()
+    plt.grid(True)
+    plt.xlim([0, t_full[-1]])
+    plt.tight_layout()
+    plt.show()
+
+
 # --- TESTING ---
 
 
@@ -331,3 +430,5 @@ if __name__ == "__main__":
 
     rectangles = load_FOV_from_csv('FOV.csv')
     calculate_board_movement_time(rectangles)
+    scan_times = calculate_scan_time(radius=105_770_000, verbose=True)  # or whatever radius you use
+    plot_full_motion_profile(rectangles, scan_times)
