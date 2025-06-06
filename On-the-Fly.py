@@ -23,7 +23,7 @@ import csv
 # Constants
 ACCELERATION = 5_000_000_000  # nm/s²   for para x2/3 for average
 VELOCITY = 1_000_000_000      # nm/s
-JERK = 100_000_000_000          # nm/s³
+JERK = 50_000_000_000          # nm/s³
 PARABOLIC_RATIO = 2/3  # ratio of parabolic to average velocity
 # Defaults for Source Detector
 VELOCITY_S = 1_000_000      # 1 mm/s
@@ -307,11 +307,11 @@ def plot_velocity_profile(distance):
     plt.show()
 
 
-def plot_full_motion_profile(rectangles, scan_times):
+def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefix='full_motion'):
     """
     Plot the full motion profile (position, velocity, acceleration, jerk)
-    for the entire sequence of FOV moves and scans, all on one plot.
-    Also labels scan and move phases.
+    for the entire sequence of FOV moves and scans.
+    Shows 4 subplots and 1 normalized overlay plot.
     """
     t_all = []
     s_all = []
@@ -345,35 +345,22 @@ def plot_full_motion_profile(rectangles, scan_times):
         t_offset = t[-1]
         s_offset = s[-1]
 
-        # Only add scan phase if not the last FOV
-        for i in range(1, len(rectangles)):
-            # ... your move code ...
-            t_all.append(t)
-            s_all.append(s)
-            v_all.append(v)
-            a_all.append(a)
-            j_all.append(j_)
-            phase_types.append(('move', t[0], t[-1]))
+        # Always add scan phase after every move
+        t_scan = np.linspace(0, scan_times, 500)[1:] + t_offset
+        v_scan = np.ones_like(t_scan) * VELOCITY
+        s_scan = np.linspace(0, VELOCITY * scan_times, 500)[1:] + s_offset
+        a_scan = np.zeros_like(t_scan)
+        j_scan = np.zeros_like(t_scan)
 
-            t_offset = t[-1]
-            s_offset = s[-1]
+        t_all.append(t_scan)
+        s_all.append(s_scan)
+        v_all.append(v_scan)
+        a_all.append(a_scan)
+        j_all.append(j_scan)
+        phase_types.append(('scan', t_scan[0], t_scan[-1]))
 
-            # Always add scan phase after every move
-            t_scan = np.linspace(0, scan_times, 500)[1:] + t_offset
-            v_scan = np.ones_like(t_scan) * VELOCITY
-            s_scan = np.linspace(0, VELOCITY * scan_times, 500)[1:] + s_offset
-            a_scan = np.zeros_like(t_scan)
-            j_scan = np.zeros_like(t_scan)
-
-            t_all.append(t_scan)
-            s_all.append(s_scan)
-            v_all.append(v_scan)
-            a_all.append(a_scan)
-            j_all.append(j_scan)
-            phase_types.append(('scan', t_scan[0], t_scan[-1]))
-
-            t_offset = t_scan[-1]
-            s_offset = s_scan[-1]
+        t_offset = t_scan[-1]
+        s_offset = s_scan[-1]
 
     # Concatenate all segments
     t_full = np.concatenate(t_all)
@@ -382,28 +369,138 @@ def plot_full_motion_profile(rectangles, scan_times):
     a_full = np.concatenate(a_all)
     j_full = np.concatenate(j_all)
 
-    plt.figure(figsize=(14, 6))
-    plt.plot(t_full, s_full, label="Position (nm)", color='blue')
-    plt.plot(t_full, v_full, label="Velocity (nm/s)", color='orange')
-    plt.plot(t_full, a_full, label="Acceleration (nm/s²)", color='green')
-    plt.plot(t_full, j_full, label="Jerk (nm/s³)", color='red')
+    # 4 subplots with color grading for move/scan phases (background shading)
+    fig, axs = plt.subplots(4, 1, figsize=(14, 10), sharex=True)
+    labels = ["Position (nm)", "Velocity (nm/s)", "Acceleration (nm/s²)", "Jerk (nm/s³)"]
+    datas = [s_full, v_full, a_full, j_full]
+    colors = {'move': 'cyan', 'scan': 'yellow'}
+    linecolors = {'move': 'blue', 'scan': 'orange'}
 
-    # Shade scan and move phases
-    ax = plt.gca()
-    for phase, t_start, t_end in phase_types:
-        if phase == 'scan':
-            ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label='Scan Phase' if 'Scan Phase' not in ax.get_legend_handles_labels()[1] else "")
-        else:
-            ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label='Move Phase' if 'Move Phase' not in ax.get_legend_handles_labels()[1] else "")
+    # Plot the full profile on each subplot
+    for idx, ax in enumerate(axs):
+        ax.plot(t_full, datas[idx], color=colors['move'] if idx == 0 else linecolors['move'], label=labels[idx])
+        # Shade move and scan phases
+        for phase, t_start, t_end in phase_types:
+            if phase == 'scan':
+                ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label='Scan Phase' if idx == 0 else "")
+            else:
+                ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label='Move Phase' if idx == 0 else "")
+        ax.set_ylabel(labels[idx])
+        ax.grid(True)
+        if idx == 0:
+            handles, phase_labels = ax.get_legend_handles_labels()
+            # Only add phase legend once
+            ax.legend(handles, phase_labels, loc='upper right')
 
-    plt.xlabel("Time (s)")
-    plt.title("Full Motion Profile (All FOVs)")
-    plt.legend()
-    plt.grid(True)
-    plt.xlim([0, t_full[-1]])
-    plt.tight_layout()
+    axs[3].set_xlabel("Time (s)")
+    if time_range is not None:
+        axs[3].set_xlim(time_range)
+    plt.suptitle("Full Motion Profile (All FOVs) — Move (cyan), Scan (yellow)")
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig(f"{save_prefix}_subplots.png")
     plt.show()
 
+    # Normalized overlay plot
+    def normalize(arr):
+        arr = np.array(arr)
+        min_val = np.min(arr)
+        max_val = np.max(arr)
+        if max_val - min_val == 0:
+            return arr
+        return (arr - min_val) / (max_val - min_val)
+
+    plt.figure(figsize=(14, 4))
+    plt.plot(t_full, normalize(s_full), label="Position (norm)", color='blue')
+    plt.plot(t_full, normalize(v_full), label="Velocity (norm)", color='orange')
+    plt.plot(t_full, normalize(a_full), label="Acceleration (norm)", color='green')
+    plt.plot(t_full, normalize(j_full), label="Jerk (norm)", color='red')
+    plt.xlabel("Time (s)")
+    plt.title("Normalized Full Motion Profile (All FOVs)")
+    plt.legend()
+    plt.grid(True)
+    ax = plt.gca()
+    # Color the background for move and scan phases
+    added_labels = set()
+    for phase, t_start, t_end in phase_types:
+        if phase == 'scan':
+            label = 'Scan Phase' if 'Scan Phase' not in added_labels else None
+            ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label=label)
+            added_labels.add('Scan Phase')
+        else:
+            label = 'Move Phase' if 'Move Phase' not in added_labels else None
+            ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label=label)
+            added_labels.add('Move Phase')
+    if time_range is not None:
+        plt.xlim(time_range)
+    else:
+        plt.xlim([0, t_full[-1]])
+    plt.tight_layout()
+    plt.savefig(f"{save_prefix}_normalized.png")  # Save the normalized overlay
+    plt.show()
+
+def plot_scan_phase(scan_time, velocity=VELOCITY, acceleration=ACCELERATION, jerk=JERK, time_range=None, save_prefix='scan_phase'):
+    """
+    Plot position, velocity, acceleration, and jerk for a scan phase
+    including ramp-up, constant velocity, and ramp-down.
+    Shows 4 subplots and 1 normalized overlay plot.
+    """
+    distance = velocity * scan_time
+    t_total, profile = calculate_travel_time(distance, velocity, acceleration, jerk)
+    t = profile['t']
+    v = profile['v']
+    s = np.cumsum(v) * (t[1] - t[0])
+    a = np.gradient(v, t)
+    j_ = np.gradient(a, t)
+
+    # 4 subplots
+    fig, axs = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+    axs[0].plot(t, s, color='blue')
+    axs[0].set_ylabel("Position (nm)")
+    axs[0].grid(True)
+
+    axs[1].plot(t, v, color='orange')
+    axs[1].set_ylabel("Velocity (nm/s)")
+    axs[1].grid(True)
+
+    axs[2].plot(t, a, color='green')
+    axs[2].set_ylabel("Acceleration (nm/s²)")
+    axs[2].grid(True)
+
+    axs[3].plot(t, j_, color='red')
+    axs[3].set_ylabel("Jerk (nm/s³)")
+    axs[3].set_xlabel("Time (s)")
+    axs[3].grid(True)
+
+    if time_range is not None:
+        axs[3].set_xlim(time_range)
+    plt.suptitle("Scan Phase Motion Profile (with Ramp Up/Down)")
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig(f"{save_prefix}_subplots.png")  # Save the 4 subplots
+    plt.show()
+
+    # Normalized overlay plot
+    def normalize(arr):
+        arr = np.array(arr)
+        min_val = np.min(arr)
+        max_val = np.max(arr)
+        if max_val - min_val == 0:
+            return arr
+        return (arr - min_val) / (max_val - min_val)
+
+    plt.figure(figsize=(12, 4))
+    plt.plot(t, normalize(s), label="Position (norm)", color='blue')
+    plt.plot(t, normalize(v), label="Velocity (norm)", color='orange')
+    plt.plot(t, normalize(a), label="Acceleration (norm)", color='green')
+    plt.plot(t, normalize(j_), label="Jerk (norm)", color='red')
+    plt.xlabel("Time (s)")
+    plt.title("Normalized Scan Phase Motion Profile")
+    plt.legend()
+    plt.grid(True)
+    if time_range is not None:
+        plt.xlim(time_range)
+    plt.tight_layout()
+    plt.savefig(f"{save_prefix}_normalized.png")  # Save the normalized overlay
+    plt.show()
 
 # --- TESTING ---
 
@@ -431,4 +528,6 @@ if __name__ == "__main__":
     rectangles = load_FOV_from_csv('FOV.csv')
     calculate_board_movement_time(rectangles)
     scan_times = calculate_scan_time(radius=105_770_000, verbose=True)  # or whatever radius you use
-    plot_full_motion_profile(rectangles, scan_times)
+    plot_full_motion_profile(rectangles, scan_times)  # View only the first 2 seconds
+    scan_times = calculate_scan_time(radius=105_770_000, verbose=True)
+    plot_scan_phase(scan_times)  # View only the first 2 seconds
