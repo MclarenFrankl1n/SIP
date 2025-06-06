@@ -24,15 +24,15 @@ import csv
 ACCELERATION = 5_000_000_000  # nm/s²   for para x2/3 for average
 VELOCITY = 1_000_000_000      # nm/s
 JERK = 100_000_000_000          # nm/s³
+PARABOLIC_RATIO = 2/3  # ratio of parabolic to average velocity
 # Defaults for Source Detector
 VELOCITY_S = 1_000_000      # 1 mm/s
 ACCELERATION_S = 100_000_000  # 0.1 m/s²
 JERK_S = 1_000_000_000        # 1 m/s³
 PI = np.pi
-R = 50_000_000                # nm    5cm
 PROJ = 32
-EXPO = 0.050  # seconds   50ms
-CYCLE_TIME = 1.6  # seconds   10s
+EXPO = 0.05  # seconds   50ms
+CYCLE_TIME = PROJ*EXPO  # seconds   10s
 
 def calculate_maximum_velocity(radius, CycleTime):
     """
@@ -101,17 +101,18 @@ def calculate_triangular_ramp_up_down_time(v_target, j_max):
     print(f"Jerk-down time (t_j): {t_j:.5f} s")
     print(f"Total ramp-up or ramp-down time: {2*t_j:.5f} s")
     print(f"Total ramp (up+down) time: {4*t_j:.5f} s")
-    print(f"s_ramp (distance during ramp): {s_ramp:.1f} nm")
+    print(f"s_ramp (distance during ramp): {s_ramp/1e6:.1f} mm")
     return 4 * t_j, s_ramp  # Total ramp time (jerk up + down)
 
 # Scan time per FOV (for all projections)
-def calculate_scan_time(verbose=False):
+def calculate_scan_time(radius, verbose=False):
     # Use updated velocity, acceleration, and jerk that match cycle time
-    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(R, CYCLE_TIME)
-    ramp_up_time, ramp_down_time = calculate_ramp_up_down_time(VELOCITY_S, ACCELERATION_S, JERK_S)
-    scan_times = (EXPO * PROJ) + ramp_up_time + ramp_down_time
+    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(radius, CYCLE_TIME)
+    t_ramp, s_ramp = calculate_triangular_ramp_up_down_time(VELOCITY_S, JERK_S)
+    revolution = 1 # Number of revolutions per projection
+    scan_times = CYCLE_TIME*revolution + t_ramp
     if verbose:
-        print(f"Total scan time for {PROJ} projections: {scan_times:.5f} seconds")
+        print(f"Total scan time for {PROJ} projections at {revolution} revolution: {scan_times:.5f} seconds")
     return scan_times
 
 def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbose=False):
@@ -266,7 +267,8 @@ def synchronize_multi_axis_motion(p1, p2):
 # Updated board movement timing with multi-axis synchronization
 def calculate_board_movement_time(rectangles):
     ptp_times = 0
-    scan_times = calculate_scan_time()
+    radius = 105_770_000
+    scan_times = calculate_scan_time(radius, verbose=True)
     print(f"\n[Scan Time Per FOV] = {scan_times:.5f} seconds\n")
 
     for i in range(1, len(rectangles)):
@@ -305,15 +307,6 @@ def plot_velocity_profile(distance):
     plt.show()
 
 # --- TESTING ---
-
-# 6 axis, make this a list
-mock_rectangles = [ 
-    {'cx': 1000, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 100_000_000, 'cy': 20, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 100_000_000, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 0, 'cy': 100_000_000, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000},
-    {'cx': 0, 'cy': 0, 'cz': 0, 'cw': 100_000_000, 'ch': 100_000_000}
-    ]
 
 
 def load_FOV_from_csv(filename):
