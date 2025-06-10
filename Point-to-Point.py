@@ -199,7 +199,6 @@ def calculate_board_movement_time(rectangles):
         curr = tuple(rectangles[i][k] for k in axis_keys)
         sync = synchronize_multi_axis_motion(prev, curr)
         max_dist = max(sync[f'axis_{j}']['dist'] for j in range(len(prev)))
-        plot_velocity_profile(max_dist)
 
         segment_time = sync['t_sync'] + scan_times
 
@@ -213,19 +212,6 @@ def calculate_board_movement_time(rectangles):
     print(f"Total Movement + Scan Time = {ptp_times:.3f} seconds")
     return ptp_times
 
-
-def plot_velocity_profile(distance):
-    t_total, profile = calculate_travel_time(distance, VELOCITY, ACCELERATION, JERK)
-    t = profile['t']
-    v = profile['v']
-    plt.figure(figsize=(8, 4))
-    plt.plot(t, v)
-    plt.title(f"Velocity-Time Profile (distance={distance:.1e} nm)")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Velocity (nm/s)")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
 
 def load_FOV_from_csv(filename):
     """
@@ -242,11 +228,139 @@ def load_FOV_from_csv(filename):
             rectangles.append(rect)
     return rectangles
 
+def plot_full_motion_profile_ptp(rectangles, time_range=None, save_prefix='ptp_full_motion'):
+    t_all, s_all, v_all, a_all, j_all = [], [], [], [], []
+    phase_types = []
+    t_offset = 0
+    s_offset = 0
+
+    radius = 105_770_000  # or set as needed
+    # Calculate scan distance (arc) for each FOV
+    dist = 2 * PI * radius / PROJ
+
+    for i in range(1, len(rectangles)):
+        # --- Move phase ---
+        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
+        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
+        curr = tuple(rectangles[i][k] for k in axis_keys)
+        sync = synchronize_multi_axis_motion(prev, curr)
+        max_dist = max(sync[f'axis_{j}']['dist'] for j in range(len(prev)))
+        t_total, profile = calculate_travel_time(max_dist, VELOCITY, ACCELERATION, JERK)
+        t = profile['t'] + t_offset
+        v = profile['v']
+        s = np.cumsum(v) * (t[1] - t[0]) + s_offset
+        a = np.gradient(v, t)
+        j_ = np.gradient(a, t)
+
+        t_all.append(t)
+        s_all.append(s)
+        v_all.append(v)
+        a_all.append(a)
+        j_all.append(j_)
+        phase_types.append(('move', t[0], t[-1]))
+
+        t_offset = t[-1]
+        s_offset = s[-1]
+
+        # --- Scan phase (pause) ---
+        t_scan = np.linspace(0, EXPO, 200) + t_offset
+        v_scan = np.zeros_like(t_scan)
+        s_scan = np.ones_like(t_scan) * s_offset
+        a_scan = np.zeros_like(t_scan)
+        j_scan = np.zeros_like(t_scan)
+
+        t_all.append(t_scan)
+        s_all.append(s_scan)
+        v_all.append(v_scan)
+        a_all.append(a_scan)
+        j_all.append(j_scan)
+        phase_types.append(('scan', t_scan[0], t_scan[-1]))
+
+        t_offset = t_scan[-1]
+        s_offset = s_scan[-1]
+
+    # Concatenate all segments
+    t_full = np.concatenate(t_all)
+    s_full = np.concatenate(s_all)
+    v_full = np.concatenate(v_all)
+    a_full = np.concatenate(a_all)
+    j_full = np.concatenate(j_all)
+
+    # 4 subplots with color grading for move/scan phases (background shading)
+    fig, axs = plt.subplots(4, 1, figsize=(14, 10), sharex=True)
+    labels = ["Position (nm)", "Velocity (nm/s)", "Acceleration (nm/s²)", "Jerk (nm/s³)"]
+    datas = [s_full, v_full, a_full, j_full]
+    subplot_colors = ['blue', 'orange', 'green', 'red']
+
+    for idx, ax in enumerate(axs):
+        ax.plot(t_full, datas[idx], color=subplot_colors[idx])
+        # Shade move and scan phases
+        added_labels = set()
+        for phase, t_start, t_end in phase_types:
+            if phase == 'scan':
+                label = 'Scan Phase' if 'Scan Phase' not in added_labels and idx == 0 else None
+                ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label=label)
+                added_labels.add('Scan Phase')
+            else:
+                label = 'Move Phase' if 'Move Phase' not in added_labels and idx == 0 else None
+                ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label=label)
+                added_labels.add('Move Phase')
+        ax.set_ylabel(labels[idx])
+        ax.grid(True)
+        if idx == 0:
+            handles, phase_labels = ax.get_legend_handles_labels()
+            ax.legend(handles, phase_labels, loc='upper right')
+
+    axs[3].set_xlabel("Time (s)")
+    if time_range is not None:
+        axs[3].set_xlim(time_range)
+    plt.suptitle("Full Motion Profile (Stop-and-Go, All FOVs)")
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig(f"{save_prefix}_subplots.png")
+    plt.show()
+
+    # Normalized overlay plot
+    def normalize(arr):
+        arr = np.array(arr)
+        min_val = np.min(arr)
+        max_val = np.max(arr)
+        if max_val - min_val == 0:
+            return arr
+        return (arr - min_val) / (max_val - min_val)
+
+    plt.figure(figsize=(14, 4))
+    plt.plot(t_full, normalize(s_full), label="Position (norm)", color='blue')
+    plt.plot(t_full, normalize(v_full), label="Velocity (norm)", color='orange')
+    plt.plot(t_full, normalize(a_full), label="Acceleration (norm)", color='green')
+    plt.plot(t_full, normalize(j_full), label="Jerk (norm)", color='red')
+    plt.xlabel("Time (s)")
+    plt.title("Normalized Full Motion Profile (Stop-and-Go, All FOVs)")
+    plt.legend()
+    plt.grid(True)
+    ax = plt.gca()
+    added_labels = set()
+    for phase, t_start, t_end in phase_types:
+        if phase == 'scan':
+            label = 'Scan Phase' if 'Scan Phase' not in added_labels else None
+            ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label=label)
+            added_labels.add('Scan Phase')
+        else:
+            label = 'Move Phase' if 'Move Phase' not in added_labels else None
+            ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label=label)
+            added_labels.add('Move Phase')
+    if time_range is not None:
+        plt.xlim(time_range)
+    else:
+        plt.xlim([0, t_full[-1]])
+    plt.tight_layout()
+    plt.savefig(f"{save_prefix}_normalized.png")
+    plt.show()
 
 # --- TESTING ---
 
 if __name__ == "__main__":
     rectangles = load_FOV_from_csv('FOV.csv')
+    plot_full_motion_profile_ptp(rectangles)
     calculate_board_movement_time(rectangles)
 
     # arc_distance = 1000_000_000

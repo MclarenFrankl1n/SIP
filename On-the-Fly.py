@@ -279,7 +279,6 @@ def calculate_board_movement_time(rectangles):
 
         # Plot velocity profile for the greatest distance of all axes for board movement
         max_dist = max(sync[f'axis_{j}']['dist'] for j in range(len(prev)))
-        plot_velocity_profile(max_dist)
 
         segment_time = sync['t_sync'] + scan_times
 
@@ -293,21 +292,8 @@ def calculate_board_movement_time(rectangles):
     print(f"Total Movement + Scan Time = {ptp_times:.3f} seconds")
     return ptp_times
 
-def plot_velocity_profile(distance):
-    t_total, profile = calculate_travel_time(distance, VELOCITY, ACCELERATION, JERK)
-    t = profile['t']
-    v = profile['v']
-    plt.figure(figsize=(8, 4))
-    plt.plot(t, v)
-    plt.title(f"Velocity-Time Profile (distance={distance:.1e} nm)")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Velocity (nm/s)")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
 
-
-def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefix='full_motion'):
+def plot_full_motion_profile(rectangles, time_range=None, save_prefix='full_motion'):
     """
     Plot the full motion profile (position, velocity, acceleration, jerk)
     for the entire sequence of FOV moves and scans.
@@ -346,9 +332,17 @@ def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefi
         s_offset = s[-1]
 
         # Use the correct scan velocity, acceleration, and jerk for scan phase
-        JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(radius=105_770_000, CycleTime=CYCLE_TIME)
-        distance_scan = VELOCITY_S * scan_times
-        t_scan_rel, profile_scan = calculate_travel_time(distance_scan, VELOCITY_S, ACCELERATION_S, JERK_S)
+        # Calculate parabolic (triangular jerk) ramp-up/down time and distance
+        t_ramp, s_ramp = calculate_triangular_ramp_up_down_time(VELOCITY_S, JERK_S)
+        cruise_time = CYCLE_TIME  # or your desired fixed cruise time
+        cruise_distance = VELOCITY_S * cruise_time
+
+        # Total scan distance and time
+        distance_scan = 2 * s_ramp + cruise_distance
+        total_scan_time = 2 * (t_ramp / 2) + cruise_time  # t_ramp is total ramp (up+down)
+
+        # Generate the profile for this distance and velocity
+        t_scan_total, profile_scan = calculate_travel_time(distance_scan, VELOCITY_S, ACCELERATION_S, JERK_S)
         t_scan = profile_scan['t'] + t_offset
         v_scan = profile_scan['v']
         s_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + s_offset
@@ -376,12 +370,11 @@ def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefi
     fig, axs = plt.subplots(4, 1, figsize=(14, 10), sharex=True)
     labels = ["Position (nm)", "Velocity (nm/s)", "Acceleration (nm/s²)", "Jerk (nm/s³)"]
     datas = [s_full, v_full, a_full, j_full]
-    colors = {'move': 'cyan', 'scan': 'yellow'}
-    linecolors = {'move': 'blue', 'scan': 'orange'}
+    subplot_colors = ['blue', 'orange', 'green', 'red']
 
     # Plot the full profile on each subplot
     for idx, ax in enumerate(axs):
-        ax.plot(t_full, datas[idx], color='blue')
+        ax.plot(t_full, datas[idx], color=subplot_colors[idx])
         # Shade move and scan phases
         added_labels = set()
         for phase, t_start, t_end in phase_types:
@@ -446,13 +439,22 @@ def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefi
     plt.savefig(f"{save_prefix}_normalized.png")  # Save the normalized overlay
     plt.show()
 
-def plot_scan_phase(scan_time, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S, time_range=None, save_prefix='scan_phase'):
+def plot_scan_phase(cruise_time, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S, time_range=None, save_prefix='scan_phase'):
     """
     Plot position, velocity, acceleration, and jerk for a scan phase
     including ramp-up, constant velocity, and ramp-down.
     Shows 4 subplots and 1 normalized overlay plot.
     """
-    distance = velocity * scan_time
+    # Calculate ramp-up/down time and distance (parabolic/triangular jerk)
+    t_ramp, s_ramp = calculate_triangular_ramp_up_down_time(velocity, jerk)
+    # t_ramp is total ramp time (up+down), so each ramp is t_ramp/2
+    ramp_time = t_ramp / 2
+
+    # Total scan distance = ramp up + cruise + ramp down
+    cruise_distance = velocity * cruise_time
+    distance = 2 * s_ramp + cruise_distance
+
+    # Generate the full profile (ramp up -> cruise -> ramp down)
     t_total, profile = calculate_travel_time(distance, velocity, acceleration, jerk)
     t = profile['t']
     v = profile['v']
@@ -539,4 +541,4 @@ if __name__ == "__main__":
     scan_times = calculate_scan_time(radius=105_770_000, verbose=True)  # or whatever radius you use
     plot_full_motion_profile(rectangles, scan_times)  # View only the first 2 seconds
     scan_times = calculate_scan_time(radius=105_770_000, verbose=True)
-    plot_scan_phase(scan_times, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S)
+    plot_scan_phase(CYCLE_TIME, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S)
