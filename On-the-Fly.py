@@ -381,13 +381,18 @@ def plot_full_motion_profile(rectangles, scan_times, time_range=None, save_prefi
 
     # Plot the full profile on each subplot
     for idx, ax in enumerate(axs):
-        ax.plot(t_full, datas[idx], color=colors['move'] if idx == 0 else linecolors['move'], label=labels[idx])
+        ax.plot(t_full, datas[idx], color='blue')
         # Shade move and scan phases
+        added_labels = set()
         for phase, t_start, t_end in phase_types:
             if phase == 'scan':
-                ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label='Scan Phase' if idx == 0 else "")
+                label = 'Scan Phase' if 'Scan Phase' not in added_labels and idx == 0 else None
+                ax.axvspan(t_start, t_end, color='yellow', alpha=0.2, label=label)
+                added_labels.add('Scan Phase')
             else:
-                ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label='Move Phase' if idx == 0 else "")
+                label = 'Move Phase' if 'Move Phase' not in added_labels and idx == 0 else None
+                ax.axvspan(t_start, t_end, color='cyan', alpha=0.1, label=label)
+                added_labels.add('Move Phase')
         ax.set_ylabel(labels[idx])
         ax.grid(True)
         if idx == 0:
