@@ -4,9 +4,6 @@ import matplotlib.pyplot as plt
 PI = np.pi
 
 def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
-    """
-    All parameters and returns are in SI units (meters, seconds).
-    """
     V_max = 2 * radius * PI / CycleTime  # m/s
     print(f"Maximum Velocity = {V_max:.6f} m/s")
     if velocity == 0:
@@ -22,7 +19,7 @@ def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
 ACCELERATION = 5      # m/s²  
 VELOCITY = 1          # m/s
 JERK = 100            # m/s³
-RADIUS = 0.10577      # meters (was 105.77 mm)
+RADIUS = 0.10577      # meters
 EXPO = 0.05
 PROJ = 32
 CycleTime = EXPO * PROJ
@@ -51,16 +48,13 @@ ramp_distance = (peak_vel**2 / peak_accel)  # meters
 b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
 a = -b / ramp_time
 
-# --- Time arrays ---
+# --- Time arrays for each phase ---
 cruise_distance = 2 * np.pi * radius  # meters (cruise phase only)
 cruise_time = cruise_distance / peak_vel  # seconds
 
 t_up = np.arange(0, ramp_time, dt)
-t_cruise = np.arange(ramp_time, ramp_time + cruise_time, dt)
-t_down = np.arange(ramp_time + cruise_time, ramp_time + cruise_time + ramp_time, dt)
-
-# Then concatenate as:
-t = np.concatenate([t_up, t_cruise, t_down])
+t_cruise = np.arange(0, cruise_time, dt)
+t_down = np.arange(0, ramp_time, dt)
 
 # --- Ramp-up phase ---
 accel_up = a * t_up**2 + b * t_up
@@ -74,8 +68,11 @@ jerk_up[1:] = (accel_up[1:] - accel_up[:-1]) / dt
 
 # --- Cruise phase ---
 accel_cruise = np.zeros_like(t_cruise)
-vel_cruise = np.ones_like(t_cruise) * peak_vel
-pos_cruise = pos_up[-1] + np.cumsum(vel_cruise) * dt
+vel_cruise = np.ones_like(t_cruise) * vel_up[-1]
+pos_cruise = np.zeros_like(t_cruise)
+pos_cruise[0] = pos_up[-1]
+for i in range(1, len(t_cruise)):
+    pos_cruise[i] = pos_cruise[i-1] + vel_cruise[i-1] * dt
 jerk_cruise = np.zeros_like(t_cruise)
 
 # --- Ramp-down phase (mirror of ramp-up) ---
@@ -90,19 +87,22 @@ for i in range(1, len(t_down)):
 jerk_down = np.zeros_like(t_down)
 jerk_down[1:] = (accel_down[1:] - accel_down[:-1]) / dt
 
+# Remove the last point from t_up and t_cruise to avoid overlap
+t = np.concatenate([
+    t_up[:-1],
+    t_cruise[:-1] + t_up[-1],
+    t_down + t_up[-1] + t_cruise[-1]
+])
+accel = np.concatenate([accel_up[:-1], accel_cruise[:-1], accel_down])
+vel = np.concatenate([vel_up[:-1], vel_cruise[:-1], vel_down])
+pos = np.concatenate([pos_up[:-1], pos_cruise[:-1], pos_down])
+jerk = np.concatenate([jerk_up[:-1], jerk_cruise[:-1], jerk_down])
 
 # Add margin (e.g., 0.1s) after the last point
 margin = 0.1  # seconds
 t_margin = np.arange(t[-1] + dt, t[-1] + margin + dt, dt)
 t = np.concatenate([t, t_margin])
-
-# Pad other arrays with their final value for the margin
-pos = np.concatenate([pos_up, pos_cruise, pos_down])
-vel = np.concatenate([vel_up, vel_cruise, vel_down])
-accel = np.concatenate([accel_up, accel_cruise, accel_down])
-jerk = np.concatenate([jerk_up, jerk_cruise, jerk_down])
-
-accel = np.concatenate([accel, np.full_like(t_margin, accel[-1])])
+accel = np.concatenate([accel, np.full_like(t_margin, 0)])
 vel = np.concatenate([vel, np.full_like(t_margin, vel[-1])])
 pos = np.concatenate([pos, np.full_like(t_margin, pos[-1])])
 jerk = np.concatenate([jerk, np.zeros_like(t_margin)])
@@ -131,10 +131,9 @@ print(f"b (linear coefficient) = {b:.6f}")
 print("\nFirst 10 values:")
 print("Time\tCirc Accel\tCirc Vel\tCirc Pos\tCirc Jerk\tDegrees\t\tX Pos (m)\tY Pos (m)\tX Vel (m/s)\tY Vel (m/s)\tX Accel\t\tY Accel")
 for i in range(10):
-    deg = np.degrees(degrees[i])
-    print(f"{t[i]:.3f}\t{accel[i]:.7f}\t{vel[i]:.7f}\t{pos[i]:.7f}\t{jerk[i]:.7f}\t"
-      f"{deg:.7f}\t{x_pos[i]:.7f}\t{y_pos[i]:.7f}\t{x_vel[i]:.7f}\t{y_vel[i]:.7f}\t"
-      f"{x_accel[i]:.7f}\t{y_accel[i]:.7f}")
+    print(f"{t[i]:.7f}\t{accel[i]:.7f}\t{vel[i]:.7f}\t{pos[i]:.7f}\t{jerk[i]:.7f}\t"
+          f"{degrees[i]:.7f}\t{x_pos[i]:.7f}\t{y_pos[i]:.7f}\t{x_vel[i]:.7f}\t{y_vel[i]:.7f}\t"
+          f"{x_accel[i]:.7f}\t{y_accel[i]:.7f}")
 
 # Define phase boundaries
 t_rampup_end = ramp_time
