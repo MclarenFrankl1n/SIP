@@ -1,7 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+#PARAMETERS
 PI = np.pi
+ACCELERATION = 5      # m/s²  
+VELOCITY = 1          # m/s
+JERK = 100            # m/s³
+RADIUS = 0.10577      # meters
+EXPO = 0.05
+PROJ = 32
+CycleTime = EXPO * PROJ
+parabolic_ratio = 2/3
+dt = 0.001
+num_rev = 1.0
 
 def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
     V_max = 2 * radius * PI / CycleTime  # m/s
@@ -15,15 +26,6 @@ def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
     print(f"Jerk = {J:.6f} m/s³, Acceleration = {A:.6f} m/s², Velocity = {V:.6f} m/s")
     return J, A, V
 
-# Reference values (all SI units)
-ACCELERATION = 5      # m/s²  
-VELOCITY = 1          # m/s
-JERK = 100            # m/s³
-RADIUS = 0.10577      # meters
-EXPO = 0.05
-PROJ = 32
-CycleTime = EXPO * PROJ
-
 # Calculate scaled parameters for cruise phase
 JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
     RADIUS, CycleTime, JERK, ACCELERATION, VELOCITY
@@ -34,15 +36,11 @@ peak_accel = ACCELERATION_S
 peak_jerk = JERK_S
 radius = RADIUS
 
-# --- Parameters (edit as needed) ---
-parabolic_ratio = 2/3
-dt = 0.001
-num_rev = 1.0
 
 # --- Ramping time and distance ---
 ramp_time = peak_vel / (peak_accel * parabolic_ratio)
 half_ramp_time = ramp_time / 2
-ramp_distance = (peak_vel**2 / peak_accel)  # meters
+ramp_distance = (peak_vel**2 / (2 * peak_accel * parabolic_ratio))  # meters
 
 # --- Quadratic acceleration coefficients ---
 b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
@@ -113,8 +111,12 @@ x_pos = radius * np.cos(np.radians(degrees))  # meters
 y_pos = radius * np.sin(np.radians(degrees))  # meters
 x_vel = vel * np.sin(np.radians(degrees))
 y_vel = vel * np.cos(np.radians(degrees))
-x_accel = np.gradient(x_vel, dt)
-y_accel = np.gradient(y_vel, dt)
+x_accel = np.zeros_like(x_vel)
+x_accel[1:] = (x_vel[1:] - x_vel[:-1]) / dt
+x_accel[0] = x_accel[1]  # or set to 0 or np.nan as appropriate
+y_accel = np.zeros_like(y_vel)
+y_accel[1:] = (y_vel[1:] - y_vel[:-1]) / dt
+y_accel[0] = y_accel[1]  # or set to 0 or np.nan as appropriate
 
 print(f"peak_accel = {peak_accel} m/s^2")
 print(f"peak_vel = {peak_vel} m/s")
@@ -131,7 +133,7 @@ print(f"b (linear coefficient) = {b:.6f}")
 print("\nFirst 10 values:")
 print("Time\tCirc Accel\tCirc Vel\tCirc Pos\tCirc Jerk\tDegrees\t\tX Pos (m)\tY Pos (m)\tX Vel (m/s)\tY Vel (m/s)\tX Accel\t\tY Accel")
 for i in range(10):
-    print(f"{t[i]:.7f}\t{accel[i]:.7f}\t{vel[i]:.7f}\t{pos[i]:.7f}\t{jerk[i]:.7f}\t"
+    print(f"{t[i]:.3f}\t{accel[i]:.7f}\t{vel[i]:.7f}\t{pos[i]:.7f}\t{jerk[i]:.7f}\t"
           f"{degrees[i]:.7f}\t{x_pos[i]:.7f}\t{y_pos[i]:.7f}\t{x_vel[i]:.7f}\t{y_vel[i]:.7f}\t"
           f"{x_accel[i]:.7f}\t{y_accel[i]:.7f}")
 
