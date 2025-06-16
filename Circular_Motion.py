@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-#PARAMETERS
+# PARAMETERS
 PI = np.pi
 ACCELERATION = 5      # m/s²  
 VELOCITY = 1          # m/s
@@ -31,179 +31,530 @@ JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
     RADIUS, CycleTime, JERK, ACCELERATION, VELOCITY
 )
 
-peak_vel = VELOCITY_S
-peak_accel = ACCELERATION_S
-peak_jerk = JERK_S
-radius = RADIUS
+def calculate_scan_time(radius, verbose=False, return_profile=False):
+    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
+    radius=RADIUS, CycleTime=CycleTime, jerk=JERK, accel=ACCELERATION, velocity=VELOCITY
+)
+    peak_vel = VELOCITY_S
+    peak_accel = ACCELERATION_S
+    parabolic_ratio = 2/3
+
+    ramp_time = peak_vel / (peak_accel * parabolic_ratio)
+    half_ramp_time = ramp_time / 2
+    b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
+    a = -b / ramp_time
+
+    cruise_distance = 2 * np.pi * radius
+    cruise_time = cruise_distance / peak_vel
+
+    t_up = np.arange(0, ramp_time, dt)
+    t_cruise = np.arange(0, cruise_time, dt)
+    t_down = np.arange(0, ramp_time, dt)
+
+    # Ramp-up
+    accel_up = a * t_up**2 + b * t_up
+    vel_up = np.zeros_like(t_up)
+    for i in range(1, len(t_up)):
+        vel_up[i] = vel_up[i-1] + accel_up[i-1] * dt
+
+    # Cruise
+    vel_cruise = np.ones_like(t_cruise) * vel_up[-1]
+
+    # Ramp-down
+    accel_down = -accel_up[::-1]
+    vel_down = np.zeros_like(t_down)
+    vel_down[0] = vel_cruise[-1]
+    for i in range(1, len(t_down)):
+        vel_down[i] = vel_down[i-1] + accel_down[i-1] * dt
+
+    # Concatenate
+    t = np.concatenate([
+        t_up[:-1],
+        t_cruise[:-1] + t_up[-1],
+        t_down + t_up[-1] + t_cruise[-1]
+    ])
+    vel = np.concatenate([vel_up[:-1], vel_cruise[:-1], vel_down])
+    total_time = t[-1]
+
+    if verbose:
+        print(f"Scan time for one revolution: {total_time:.6f} s")
+    if return_profile:
+        return total_time, t, vel
+    return total_time
+
+def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbose=False):
+    t_j = a_max / j_max  # time to reach max acceleration
+    t_const_a = (v_max - a_max * t_j) / a_max  # time at constant acceleration
+    s_accel = 1/3 * j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2
+    s_total_accel_decel = 2 * s_accel
+    if verbose:
+        print(f"t_j = {t_j:.5f} s, t_const_a = {t_const_a:.5f} s")
+        print(f"s_accel = {s_accel:.5f} nm, s_total_accel_decel = {s_total_accel_decel:.5f} nm")
+
+    if distance < s_total_accel_decel:
+        # Triangular motion profile
+        t_j = (3 * distance / (2 * j_max))**(1/3)
+        t_total = 4 * t_j
+        t_vals = np.linspace(0, t_total, resolution)
+        v_vals = np.zeros_like(t_vals)
+        if verbose:
+            print("Triangular Profile")
+
+        t1 = t_j
+        t2 = 2 * t_j
+        t3 = 3 * t_j
+
+        for i, t in enumerate(t_vals):
+            if t < t1:
+                v_vals[i] = 0.5 * j_max * t**2
+            elif t < t2:
+                dt = t - t_j
+                v_vals[i] = (j_max * t_j**2 / 2) + j_max * t_j * dt - j_max * dt**2 / 2
+            elif t < t3:
+                dt = t - 2 * t_j
+                v_vals[i] = (j_max * t_j**2) - j_max * dt**2 / 2
+            else:
+                dt = t - 3 * t_j
+                v_vals[i] = j_max * t_j**2 / 2 - j_max * t_j * dt + j_max * dt**2 / 2
+
+        return t_total, {
+            'type': 'triangular',
+            't': t_vals,
+            'v': v_vals,
+            't_total': t_total
+        }
+
+    else:
+        # S-curve profile
+        s_cruise = distance - s_total_accel_decel
+        t_cruise = s_cruise / v_max
+        if verbose:
+            print(f"t_cruise = {t_cruise:.5f} s")
+        t_total = 2 * t_j + t_const_a + t_cruise + 2 * t_j + t_const_a
+        t_vals = np.linspace(0, t_total, resolution)
+        v_vals = np.zeros_like(t_vals)
+        if verbose:
+            print("S-Curve Profile")
+
+        # Define phase boundaries
+        t1 = t_j
+        t2 = t1 + t_const_a
+        t3 = t2 + t_j
+        t4 = t3 + t_cruise
+        t5 = t4 + t_j
+        t6 = t5 + t_const_a
+        t7 = t6 + t_j
+        if verbose:
+            print(f"t1 = {t1:.5f} s, t2 = {t2:.5f} s, t3 = {t3:.5f} s, t4 = {t4:.5f} s")
+            print(f"t5 = {t5:.5f} s, t6 = {t6:.5f} s, t7 = {t7:.5f} s")
+
+        for i, t in enumerate(t_vals):
+            if t < t1:
+                # Phase 1: Jerk up
+                v_vals[i] = 0.5 * j_max * t**2
+            elif t < t2:
+                # Phase 2: Constant acceleration
+                dt = t - t1
+                v_vals[i] = 0.5 * j_max * t_j**2 + a_max * dt
+            elif t < t3:
+                # Phase 3: Jerk down
+                dt = t - t2
+                v_vals[i] = 0.5 * j_max * t_j**2 + a_max * t_const_a + a_max * dt - 0.5 * j_max * dt**2
+            elif t < t4:
+                # Phase 4: Cruise
+                v_vals[i] = v_max
+            elif t < t5:
+                # Phase 5: Jerk down (decel start)
+                dt = t - t4
+                v_vals[i] = v_max - 0.5 * j_max * dt**2
+            elif t < t6:
+                # Phase 6: Constant deceleration
+                dt = t - t5
+                v_vals[i] = v_max - 0.5 * j_max * t_j**2 - a_max * dt
+            else:
+                # Phase 7: Jerk up (decel end)
+                dt = t - t6
+                v_vals[i] = v_max - 0.5 * j_max * t_j**2 - a_max * t_const_a - a_max * dt + 0.5 * j_max * dt**2
+
+        return t_total, {
+            'type': 's-curve',
+            't': t_vals,
+            'v': v_vals,
+            't_total': t_total
+        }
+
+def synchronize_multi_axis_motion(p1, p2):
+    # p1, p2: tuples/lists of axis positions
+    n_axes = len(p1)
+    distances = [abs(p2[i] - p1[i]) for i in range(n_axes)]
+    times = []
+    for dist in distances:
+        t,_ = calculate_travel_time(dist, VELOCITY, ACCELERATION, JERK)
+        times.append(t)
+    t_sync = max(times)
+    sync_axis_idx = times.index(t_sync)
+    sync_axis = f"Axis{sync_axis_idx}"
+    params = []
+    for t_i in times:
+        if t_i == 0:
+            params.append((JERK, ACCELERATION, VELOCITY))
+        else:
+            scale = t_i / t_sync if t_sync > 0 else 1
+            j = JERK * scale**3
+            a = ACCELERATION * scale**2
+            v = VELOCITY * scale
+            params.append((j, a, v))
+    result = {
+        't_sync': t_sync,
+        'sync_axis': sync_axis,
+    }
+    for i in range(n_axes):
+        result[f"axis_{i}"] = {
+            'dist': distances[i],
+            'jerk': params[i][0],
+            'accel': params[i][1],
+            'vel': params[i][2],
+        }
+    return result
+
+def calculate_board_movement_time(rectangles):
+    ptp_times = 0
+    radius = RADIUS
+    scan_times = calculate_scan_time(radius, verbose=True)
+    print(f"\n[Scan Time Per FOV] = {scan_times:.5f} seconds\n")
+    for i in range(1, len(rectangles)):
+        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
+        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
+        curr = tuple(rectangles[i][k] for k in axis_keys)
+        sync = synchronize_multi_axis_motion(prev, curr)
+        segment_time = sync['t_sync'] + scan_times
+        print(f"[FOV {i}] Move from {prev} to {curr}")
+        print(f"         Travel   = {sync['t_sync']:.5f} s")
+        print(f"         Scan     = {scan_times:.5f} s")
+        print(f"         Segment  = {segment_time:.5f} s\n")
+        ptp_times += segment_time
+    print(f"Total Movement + Scan Time = {ptp_times:.3f} seconds")
+    return ptp_times
+
+def load_FOV_from_csv(filename):
+    import csv
+    rectangles = []
+    with open(filename, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            # Convert all values from nm to m
+            rect = {k: float(v) / 1e9 for k, v in row.items()}
+            rectangles.append(rect)
+    return rectangles
+
+# def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
+#     V_max = 2 * radius * PI / CycleTime  # m/s
+#     print(f"Maximum Velocity = {V_max:.6f} m/s")
+#     if velocity == 0:
+#         return jerk, accel, velocity
+#     scale = V_max / velocity
+#     J = jerk * scale**3
+#     A = accel * scale**2
+#     V = V_max
+#     print(f"Jerk = {J:.6f} m/s³, Acceleration = {A:.6f} m/s², Velocity = {V:.6f} m/s")
+#     return J, A, V
+
+# # Calculate scaled parameters for cruise phase
+# JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
+#     RADIUS, CycleTime, JERK, ACCELERATION, VELOCITY
+# )
+
+# peak_vel = VELOCITY_S
+# peak_accel = ACCELERATION_S
+# peak_jerk = JERK_S
+# radius = RADIUS
 
 
-# --- Ramping time and distance ---
-ramp_time = peak_vel / (peak_accel * parabolic_ratio)
-half_ramp_time = ramp_time / 2
-ramp_distance = (peak_vel**2 / (2 * peak_accel * parabolic_ratio))  # meters
+# # --- Ramping time and distance ---
+# ramp_time = peak_vel / (peak_accel * parabolic_ratio)
+# half_ramp_time = ramp_time / 2
+# ramp_distance = (peak_vel**2 / (2 * peak_accel * parabolic_ratio))  # meters
 
-# --- Quadratic acceleration coefficients ---
-b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
-a = -b / ramp_time
+# # --- Quadratic acceleration coefficients ---
+# b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
+# a = -b / ramp_time
 
-# --- Time arrays for each phase ---
-cruise_distance = 2 * np.pi * radius  # meters (cruise phase only)
-cruise_time = cruise_distance / peak_vel  # seconds
+# # --- Time arrays for each phase ---
+# cruise_distance = 2 * np.pi * radius  # meters (cruise phase only)
+# cruise_time = cruise_distance / peak_vel  # seconds
 
-t_up = np.arange(0, ramp_time, dt)
-t_cruise = np.arange(0, cruise_time, dt)
-t_down = np.arange(0, ramp_time, dt)
+# t_up = np.arange(0, ramp_time, dt)
+# t_cruise = np.arange(0, cruise_time, dt)
+# t_down = np.arange(0, ramp_time, dt)
 
-# --- Ramp-up phase ---
-accel_up = a * t_up**2 + b * t_up
-vel_up = np.zeros_like(t_up)
-pos_up = np.zeros_like(t_up)
-for i in range(1, len(t_up)):
-    vel_up[i] = vel_up[i-1] + accel_up[i-1] * dt
-    pos_up[i] = pos_up[i-1] + vel_up[i-1] * dt
-jerk_up = np.zeros_like(t_up)
-jerk_up[1:] = (accel_up[1:] - accel_up[:-1]) / dt
+# # --- Ramp-up phase ---
+# accel_up = a * t_up**2 + b * t_up
+# vel_up = np.zeros_like(t_up)
+# pos_up = np.zeros_like(t_up)
+# for i in range(1, len(t_up)):
+#     vel_up[i] = vel_up[i-1] + accel_up[i-1] * dt
+#     pos_up[i] = pos_up[i-1] + vel_up[i-1] * dt
+# jerk_up = np.zeros_like(t_up)
+# jerk_up[1:] = (accel_up[1:] - accel_up[:-1]) / dt
 
-# --- Cruise phase ---
-accel_cruise = np.zeros_like(t_cruise)
-vel_cruise = np.ones_like(t_cruise) * vel_up[-1]
-pos_cruise = np.zeros_like(t_cruise)
-pos_cruise[0] = pos_up[-1]
-for i in range(1, len(t_cruise)):
-    pos_cruise[i] = pos_cruise[i-1] + vel_cruise[i-1] * dt
-jerk_cruise = np.zeros_like(t_cruise)
+# # --- Cruise phase ---
+# accel_cruise = np.zeros_like(t_cruise)
+# vel_cruise = np.ones_like(t_cruise) * vel_up[-1]
+# pos_cruise = np.zeros_like(t_cruise)
+# pos_cruise[0] = pos_up[-1]
+# for i in range(1, len(t_cruise)):
+#     pos_cruise[i] = pos_cruise[i-1] + vel_cruise[i-1] * dt
+# jerk_cruise = np.zeros_like(t_cruise)
 
-# --- Ramp-down phase (mirror of ramp-up) ---
-accel_down = -accel_up[::-1]
-vel_down = np.zeros_like(t_down)
-pos_down = np.zeros_like(t_down)
-vel_down[0] = vel_cruise[-1]
-pos_down[0] = pos_cruise[-1]
-for i in range(1, len(t_down)):
-    vel_down[i] = vel_down[i-1] + accel_down[i-1] * dt
-    pos_down[i] = pos_down[i-1] + vel_down[i-1] * dt
-jerk_down = np.zeros_like(t_down)
-jerk_down[1:] = (accel_down[1:] - accel_down[:-1]) / dt
+# # --- Ramp-down phase (mirror of ramp-up) ---
+# accel_down = -accel_up[::-1]
+# vel_down = np.zeros_like(t_down)
+# pos_down = np.zeros_like(t_down)
+# vel_down[0] = vel_cruise[-1]
+# pos_down[0] = pos_cruise[-1]
+# for i in range(1, len(t_down)):
+#     vel_down[i] = vel_down[i-1] + accel_down[i-1] * dt
+#     pos_down[i] = pos_down[i-1] + vel_down[i-1] * dt
+# jerk_down = np.zeros_like(t_down)
+# jerk_down[1:] = (accel_down[1:] - accel_down[:-1]) / dt
 
-# Remove the last point from t_up and t_cruise to avoid overlap
-t = np.concatenate([
-    t_up[:-1],
-    t_cruise[:-1] + t_up[-1],
-    t_down + t_up[-1] + t_cruise[-1]
-])
-accel = np.concatenate([accel_up[:-1], accel_cruise[:-1], accel_down])
-vel = np.concatenate([vel_up[:-1], vel_cruise[:-1], vel_down])
-pos = np.concatenate([pos_up[:-1], pos_cruise[:-1], pos_down])
-jerk = np.concatenate([jerk_up[:-1], jerk_cruise[:-1], jerk_down])
+# # Remove the last point from t_up and t_cruise to avoid overlap
+# t = np.concatenate([
+#     t_up[:-1],
+#     t_cruise[:-1] + t_up[-1],
+#     t_down + t_up[-1] + t_cruise[-1]
+# ])
+# accel = np.concatenate([accel_up[:-1], accel_cruise[:-1], accel_down])
+# vel = np.concatenate([vel_up[:-1], vel_cruise[:-1], vel_down])
+# pos = np.concatenate([pos_up[:-1], pos_cruise[:-1], pos_down])
+# jerk = np.concatenate([jerk_up[:-1], jerk_cruise[:-1], jerk_down])
 
-# Add margin (e.g., 0.1s) after the last point
-margin = 0.1  # seconds
-t_margin = np.arange(t[-1] + dt, t[-1] + margin + dt, dt)
-t = np.concatenate([t, t_margin])
-accel = np.concatenate([accel, np.full_like(t_margin, 0)])
-vel = np.concatenate([vel, np.full_like(t_margin, vel[-1])])
-pos = np.concatenate([pos, np.full_like(t_margin, pos[-1])])
-jerk = np.concatenate([jerk, np.zeros_like(t_margin)])
+# # Add margin (e.g., 0.1s) after the last point
+# margin = 0.1  # seconds
+# t_margin = np.arange(t[-1] + dt, t[-1] + margin + dt, dt)
+# t = np.concatenate([t, t_margin])
+# accel = np.concatenate([accel, np.full_like(t_margin, 0)])
+# vel = np.concatenate([vel, np.full_like(t_margin, vel[-1])])
+# pos = np.concatenate([pos, np.full_like(t_margin, pos[-1])])
+# jerk = np.concatenate([jerk, np.zeros_like(t_margin)])
 
-# --- Circular projection ---
-degrees = np.degrees(pos / radius)
-x_pos = radius * np.cos(np.radians(degrees))  # meters
-y_pos = radius * np.sin(np.radians(degrees))  # meters
-x_vel = vel * np.sin(np.radians(degrees))
-y_vel = vel * np.cos(np.radians(degrees))
-x_accel = np.zeros_like(x_vel)
-x_accel[1:] = (x_vel[1:] - x_vel[:-1]) / dt
-x_accel[0] = x_accel[1]  # or set to 0 or np.nan as appropriate
-y_accel = np.zeros_like(y_vel)
-y_accel[1:] = (y_vel[1:] - y_vel[:-1]) / dt
-y_accel[0] = y_accel[1]  # or set to 0 or np.nan as appropriate
+# # --- Circular projection ---
+# degrees = np.degrees(pos / radius)
+# x_pos = radius * np.cos(np.radians(degrees))  # meters
+# y_pos = radius * np.sin(np.radians(degrees))  # meters
+# x_vel = vel * np.sin(np.radians(degrees))
+# y_vel = vel * np.cos(np.radians(degrees))
+# x_accel = np.zeros_like(x_vel)
+# x_accel[1:] = (x_vel[1:] - x_vel[:-1]) / dt
+# x_accel[0] = x_accel[1]  # or set to 0 or np.nan as appropriate
+# y_accel = np.zeros_like(y_vel)
+# y_accel[1:] = (y_vel[1:] - y_vel[:-1]) / dt
+# y_accel[0] = y_accel[1]  # or set to 0 or np.nan as appropriate
 
-print(f"peak_accel = {peak_accel} m/s^2")
-print(f"peak_vel = {peak_vel} m/s")
-print(f"parabolic_ratio = {parabolic_ratio}")
-print(f"dt = {dt} s")
-print(f"radius = {radius} m")
-print(f"num_rev = {num_rev}")
-print(f"ramp_time = {ramp_time:.6f} s")
-print(f"half_ramp_time = {half_ramp_time:.6f} s")
-print(f"ramp_distance = {ramp_distance:.6f} m")
-print(f"a (quadratic coefficient) = {a:.6f}")
-print(f"b (linear coefficient) = {b:.6f}")
+# print(f"peak_accel = {peak_accel} m/s^2")
+# print(f"peak_vel = {peak_vel} m/s")
+# print(f"parabolic_ratio = {parabolic_ratio}")
+# print(f"dt = {dt} s")
+# print(f"radius = {radius} m")
+# print(f"num_rev = {num_rev}")
+# print(f"ramp_time = {ramp_time:.6f} s")
+# print(f"half_ramp_time = {half_ramp_time:.6f} s")
+# print(f"ramp_distance = {ramp_distance:.6f} m")
+# print(f"a (quadratic coefficient) = {a:.6f}")
+# print(f"b (linear coefficient) = {b:.6f}")
 
-print("\nFirst 10 values:")
-print("Time\tCirc Accel\tCirc Vel\tCirc Pos\tCirc Jerk\tDegrees\t\tX Pos (m)\tY Pos (m)\tX Vel (m/s)\tY Vel (m/s)\tX Accel\t\tY Accel")
-for i in range(10):
-    print(f"{t[i]:.3f}\t{accel[i]:.7f}\t{vel[i]:.7f}\t{pos[i]:.7f}\t{jerk[i]:.7f}\t"
-          f"{degrees[i]:.7f}\t{x_pos[i]:.7f}\t{y_pos[i]:.7f}\t{x_vel[i]:.7f}\t{y_vel[i]:.7f}\t"
-          f"{x_accel[i]:.7f}\t{y_accel[i]:.7f}")
+# print("\nFirst 10 values:")
+# print("Time\tCirc Accel\tCirc Vel\tCirc Pos\tCirc Jerk\tDegrees\t\tX Pos (m)\tY Pos (m)\tX Vel (m/s)\tY Vel (m/s)\tX Accel\t\tY Accel")
+# for i in range(10):
+#     print(f"{t[i]:.3f}\t{accel[i]:.7f}\t{vel[i]:.7f}\t{pos[i]:.7f}\t{jerk[i]:.7f}\t"
+#           f"{degrees[i]:.7f}\t{x_pos[i]:.7f}\t{y_pos[i]:.7f}\t{x_vel[i]:.7f}\t{y_vel[i]:.7f}\t"
+#           f"{x_accel[i]:.7f}\t{y_accel[i]:.7f}")
 
-# Define phase boundaries
-t_rampup_end = ramp_time
-t_cruise_end = ramp_time + cruise_time
-t_rampdown_end = ramp_time + cruise_time + ramp_time
+# # Define phase boundaries
+# t_rampup_end = ramp_time
+# t_cruise_end = ramp_time + cruise_time
+# t_rampdown_end = ramp_time + cruise_time + ramp_time
 
-# --- Plotting motion profile: position, velocity, acceleration, jerk ---
-fig2, axs2 = plt.subplots(2, 2, figsize=(12, 8))
+# # --- Plotting motion profile: position, velocity, acceleration, jerk ---
+# fig2, axs2 = plt.subplots(2, 2, figsize=(12, 8))
 
-for ax in axs2.flat:
-    # Ramp-up: light blue
-    ax.axvspan(0, t_rampup_end, color='#cce5ff', alpha=0.5, label='Ramp-up' if ax==axs2[0,0] else "")
-    # Cruise: light green
-    ax.axvspan(t_rampup_end, t_cruise_end, color='#d4edda', alpha=0.5, label='Cruise' if ax==axs2[0,0] else "")
-    # Ramp-down: light red
-    ax.axvspan(t_cruise_end, t_rampdown_end, color='#f8d7da', alpha=0.5, label='Ramp-down' if ax==axs2[0,0] else "")
+# for ax in axs2.flat:
+#     # Ramp-up: light blue
+#     ax.axvspan(0, t_rampup_end, color='#cce5ff', alpha=0.5, label='Ramp-up' if ax==axs2[0,0] else "")
+#     # Cruise: light green
+#     ax.axvspan(t_rampup_end, t_cruise_end, color='#d4edda', alpha=0.5, label='Cruise' if ax==axs2[0,0] else "")
+#     # Ramp-down: light red
+#     ax.axvspan(t_cruise_end, t_rampdown_end, color='#f8d7da', alpha=0.5, label='Ramp-down' if ax==axs2[0,0] else "")
 
-axs2[0, 0].plot(t, pos, color='orange')
-axs2[0, 0].set_title("Position (m)")
-axs2[0, 0].set_xlabel("Time (s)")
-axs2[0, 0].set_ylabel("Position (m)")
-axs2[0, 0].grid(True)
+# axs2[0, 0].plot(t, pos, color='orange')
+# axs2[0, 0].set_title("Position (m)")
+# axs2[0, 0].set_xlabel("Time (s)")
+# axs2[0, 0].set_ylabel("Position (m)")
+# axs2[0, 0].grid(True)
 
-axs2[0, 1].plot(t, vel, color='red')
-axs2[0, 1].set_title("Velocity (m/s)")
-axs2[0, 1].set_xlabel("Time (s)")
-axs2[0, 1].set_ylabel("Velocity (m/s)")
-axs2[0, 1].grid(True)
+# axs2[0, 1].plot(t, vel, color='red')
+# axs2[0, 1].set_title("Velocity (m/s)")
+# axs2[0, 1].set_xlabel("Time (s)")
+# axs2[0, 1].set_ylabel("Velocity (m/s)")
+# axs2[0, 1].grid(True)
 
-axs2[1, 0].plot(t, accel, color='blue')
-axs2[1, 0].set_title("Acceleration (m/s²)")
-axs2[1, 0].set_xlabel("Time (s)")
-axs2[1, 0].set_ylabel("Acceleration (m/s²)")
-axs2[1, 0].grid(True)
+# axs2[1, 0].plot(t, accel, color='blue')
+# axs2[1, 0].set_title("Acceleration (m/s²)")
+# axs2[1, 0].set_xlabel("Time (s)")
+# axs2[1, 0].set_ylabel("Acceleration (m/s²)")
+# axs2[1, 0].grid(True)
 
-axs2[1, 1].plot(t, jerk, color='green')
-axs2[1, 1].set_title("Jerk (m/s³)")
-axs2[1, 1].set_xlabel("Time (s)")
-axs2[1, 1].set_ylabel("Jerk (m/s³)")
-axs2[1, 1].grid(True)
+# axs2[1, 1].plot(t, jerk, color='green')
+# axs2[1, 1].set_title("Jerk (m/s³)")
+# axs2[1, 1].set_xlabel("Time (s)")
+# axs2[1, 1].set_ylabel("Jerk (m/s³)")
+# axs2[1, 1].grid(True)
 
-# Add legend for phase backgrounds
-handles, labels = axs2[0,0].get_legend_handles_labels()
-if handles:
-    axs2[0,0].legend(loc="upper right")
+# # Add legend for phase backgrounds
+# handles, labels = axs2[0,0].get_legend_handles_labels()
+# if handles:
+#     axs2[0,0].legend(loc="upper right")
 
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.savefig(f"Overall SVAJ.png")  
+# plt.show()
 
-# --- Plotting all X/Y position, velocity, acceleration on the same plot ---
-plt.figure(figsize=(12, 8))
+# # --- Plotting all X/Y position, velocity, acceleration on the same plot ---
+# plt.figure(figsize=(12, 8))
 
-# Backgrounds for phases
-plt.axvspan(0, t_rampup_end, color='#cce5ff', alpha=0.5, label='Ramp-up')
-plt.axvspan(t_rampup_end, t_cruise_end, color='#d4edda', alpha=0.5, label='Cruise')
-plt.axvspan(t_cruise_end, t_rampdown_end, color='#f8d7da', alpha=0.5, label='Ramp-down')
+# # Backgrounds for phases
+# plt.axvspan(0, t_rampup_end, color='#cce5ff', alpha=0.5, label='Ramp-up')
+# plt.axvspan(t_rampup_end, t_cruise_end, color='#d4edda', alpha=0.5, label='Cruise')
+# plt.axvspan(t_cruise_end, t_rampdown_end, color='#f8d7da', alpha=0.5, label='Ramp-down')
 
-plt.plot(t, x_pos, label="X Position (m)", color='blue')
-plt.plot(t, y_pos, label="Y Position (m)", color='red')
-plt.plot(t, x_vel, label="X Velocity (m/s)", color='cyan', linestyle='--')
-plt.plot(t, y_vel, label="Y Velocity (m/s)", color='magenta', linestyle='--')
-plt.plot(t, x_accel, label="X Acceleration (m/s²)", color='green', linestyle=':')
-plt.plot(t, y_accel, label="Y Acceleration (m/s²)", color='orange', linestyle=':')
+# plt.plot(t, x_pos, label="X Position (m)", color='blue')
+# plt.plot(t, y_pos, label="Y Position (m)", color='red')
+# plt.plot(t, x_vel, label="X Velocity (m/s)", color='cyan', linestyle='--')
+# plt.plot(t, y_vel, label="Y Velocity (m/s)", color='magenta', linestyle='--')
+# plt.plot(t, x_accel, label="X Acceleration (m/s²)", color='green', linestyle=':')
+# plt.plot(t, y_accel, label="Y Acceleration (m/s²)", color='orange', linestyle=':')
 
-plt.title("X/Y Position, Velocity, and Acceleration vs Time")
-plt.xlabel("Time (s)")
-plt.ylabel("Value (SI Units)")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.show()
+# plt.title("X/Y Position, Velocity, and Acceleration vs Time")
+# plt.xlabel("Time (s)")
+# plt.ylabel("Value (SI Units)")
+# plt.legend()
+# plt.grid(True)
+# plt.tight_layout()
+# plt.savefig(f"XY_SVA.png")  
+# plt.show()
+
+if __name__ == "__main__":
+    rectangles = load_FOV_from_csv('FOV.csv')
+
+    t_full = []
+    pos_full = []
+    v_full = []
+    a_full = []
+    j_full = []
+    t_offset = 0
+    pos_offset = 0
+    phase_spans = []  # To store (start, end, 'move'/'scan')
+
+    for i in range(1, len(rectangles)):
+        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
+        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
+        curr = tuple(rectangles[i][k] for k in axis_keys)
+
+        # Multi-axis sync for this move
+        sync = synchronize_multi_axis_motion(prev, curr)
+        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
+        params = sync[f'axis_{sync_axis}']
+        move_dist = params['dist']
+        move_jerk = params['jerk']
+        move_accel = params['accel']
+        move_vel = params['vel']
+
+        # Move phase
+        t_total_move, move_profile = calculate_travel_time(
+            move_dist, move_vel, move_accel, move_jerk
+        )
+        t_move = move_profile['t'] + t_offset
+        v_move = move_profile['v']
+        pos_move = np.cumsum(v_move) * (t_move[1] - t_move[0]) + pos_offset
+        a_move = np.zeros_like(v_move)
+        a_move[1:] = np.diff(v_move) / np.diff(t_move)
+        j_move = np.zeros_like(a_move)
+        j_move[1:] = np.diff(a_move) / np.diff(t_move)
+
+        t_full.append(t_move)
+        v_full.append(v_move)
+        pos_full.append(pos_move)
+        a_full.append(a_move)
+        j_full.append(j_move)
+        phase_spans.append((t_move[0], t_move[-1], 'move'))
+
+        t_offset = t_move[-1]
+        pos_offset = pos_move[-1]
+
+        # Scan phase (scaled parameters)
+        scan_time, t_scan, v_scan = calculate_scan_time(RADIUS, return_profile=True)
+        t_scan = t_scan + t_offset
+        pos_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + pos_offset
+        a_scan = np.zeros_like(v_scan)
+        a_scan[1:] = np.diff(v_scan) / np.diff(t_scan)
+        j_scan = np.zeros_like(a_scan)
+        j_scan[1:] = np.diff(a_scan) / np.diff(t_scan)
+
+        t_full.append(t_scan)
+        v_full.append(v_scan)
+        pos_full.append(pos_scan)
+        a_full.append(a_scan)
+        j_full.append(j_scan)
+        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
+
+        t_offset = t_scan[-1]
+        pos_offset = pos_scan[-1]
+
+    # Concatenate all segments
+    t_full = np.concatenate(t_full)
+    pos_full = np.concatenate(pos_full)
+    v_full = np.concatenate(v_full)
+    a_full = np.concatenate(a_full)
+    j_full = np.concatenate(j_full)
+
+    # --- Plot ---
+    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+
+    # Phase backgrounds
+    for start, end, phase in phase_spans:
+        color = '#ffeeba' if phase == 'move' else '#d4edda'
+        label = 'Move' if phase == 'move' else 'Scan'
+        for ax in axs.flat:
+            ax.axvspan(start, end, color=color, alpha=0.4, label=label if ax==axs[0,0] else "")
+
+    axs[0, 0].plot(t_full, pos_full, color='orange')
+    axs[0, 0].set_title("Position (m)")
+    axs[0, 0].set_xlabel("Time (s)")
+    axs[0, 0].set_ylabel("Position (m)")
+    axs[0, 0].grid(True)
+
+    axs[0, 1].plot(t_full, v_full, color='red')
+    axs[0, 1].set_title("Velocity (m/s)")
+    axs[0, 1].set_xlabel("Time (s)")
+    axs[0, 1].set_ylabel("Velocity (m/s)")
+    axs[0, 1].grid(True)
+
+    axs[1, 0].plot(t_full, a_full, color='blue')
+    axs[1, 0].set_title("Acceleration (m/s²)")
+    axs[1, 0].set_xlabel("Time (s)")
+    axs[1, 0].set_ylabel("Acceleration (m/s²)")
+    axs[1, 0].grid(True)
+
+    axs[1, 1].plot(t_full, j_full, color='green')
+    axs[1, 1].set_title("Jerk (m/s³)")
+    axs[1, 1].set_xlabel("Time (s)")
+    axs[1, 1].set_ylabel("Jerk (m/s³)")
+    axs[1, 1].grid(True)
+
+    # Only show unique labels in legend
+    handles, labels = axs[0,0].get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    axs[0,0].legend(by_label.values(), by_label.keys(), loc="upper right")
+
+    plt.tight_layout()
+    plt.show()
