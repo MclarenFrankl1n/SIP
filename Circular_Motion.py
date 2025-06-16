@@ -15,6 +15,20 @@ dt = 0.001
 num_rev = 1.0
 
 def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
+    """
+    Calculate the maximum velocity, jerk, and acceleration for a circular motion profile based on the radius and cycle time.
+
+    Args:
+        radius (float): Radius of the circular path in meters.
+        CycleTime (float): Total cycle time in seconds.
+        jerk (float): Jerk value in m/s³.
+        accel (float): Acceleration value in m/s².
+        velocity (float): Desired velocity in m/s.
+
+    Returns:
+        tuple: Scaled jerk, acceleration, and maximum velocity.
+
+    """
     V_max = 2 * radius * PI / CycleTime  # m/s
     print(f"Maximum Velocity = {V_max:.6f} m/s")
     if velocity == 0:
@@ -26,15 +40,23 @@ def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
     print(f"Jerk = {J:.6f} m/s³, Acceleration = {A:.6f} m/s², Velocity = {V:.6f} m/s")
     return J, A, V
 
-# Calculate scaled parameters for cruise phase
-JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
-    RADIUS, CycleTime, JERK, ACCELERATION, VELOCITY
-)
-
 def calculate_scan_time(radius, verbose=False, return_profile=False):
-    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
-    radius=RADIUS, CycleTime=CycleTime, jerk=JERK, accel=ACCELERATION, velocity=VELOCITY
-)
+    """
+    Calculate the scan time for a circular motion profile based on the radius and predefined parameters.
+
+    This function computes the time required to complete a circular scan with a parabolic acceleration profile,
+    including ramp-up, cruise, and ramp-down phases. It returns the total scan time and optionally the time and
+    velocity profiles for each phase.
+
+    Args:
+        radius (float): Radius of the circular path in meters.
+
+    Returns:
+        float: Total scan time in seconds.
+        (optional) tuple: Time and velocity profiles for each phase if return_profile is True.
+        
+    """
+
     peak_vel = VELOCITY_S
     peak_accel = ACCELERATION_S
     parabolic_ratio = 2/3
@@ -77,12 +99,30 @@ def calculate_scan_time(radius, verbose=False, return_profile=False):
     total_time = t[-1]
 
     if verbose:
-        print(f"Scan time for one revolution: {total_time:.6f} s")
+        print(f"\n[Scan Time Per FOV] = {total_time:.5f} seconds\n")
     if return_profile:
         return total_time, t, vel
     return total_time
 
 def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbose=False):
+    """
+    Calculate the travel time for a motion profile based on distance, maximum velocity, acceleration, and jerk.
+
+    This function computes the time required to travel a specified distance either using a triangular or S-curve motion profile.
+    It returns the total travel time and optionally the time and velocity profiles for each phase.
+
+    Args:
+        distance (float): Distance to travel in meters.
+        v_max (float): Maximum velocity in m/s.
+        a_max (float): Maximum acceleration in m/s².
+        j_max (float): Maximum jerk in m/s³.
+        resolution (int): Number of points in the time profile.
+        verbose (bool): If True, prints detailed information about the calculation.
+
+    Returns:
+        tuple: Total travel time in seconds and a dictionary containing the motion profile type, time values, velocity values, and total time.
+        
+    """
     t_j = a_max / j_max  # time to reach max acceleration
     t_const_a = (v_max - a_max * t_j) / a_max  # time at constant acceleration
     s_accel = 1/3 * j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2
@@ -184,7 +224,23 @@ def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbos
         }
 
 def synchronize_multi_axis_motion(p1, p2):
-    # p1, p2: tuples/lists of axis positions
+    """
+    Calculate the synchronization parameters for multi-axis motion between two points.
+
+    This function computes the time required for each axis to travel from position p1 to p2,
+    and determines the synchronization axis (the axis that takes the longest time).
+    It returns a dictionary with the synchronization time and parameters for each axis.
+
+    Args:
+        p1 (tuple/list): Starting positions of the axes.
+        p2 (tuple/list): Ending positions of the axes.
+
+    Returns:
+        dict: A dictionary containing the synchronization time, the sync axis, and parameters for each axis.
+        The parameters include distance, jerk, acceleration, and velocity for each axis.
+        
+    """
+
     n_axes = len(p1)
     distances = [abs(p2[i] - p1[i]) for i in range(n_axes)]
     times = []
@@ -194,6 +250,10 @@ def synchronize_multi_axis_motion(p1, p2):
     t_sync = max(times)
     sync_axis_idx = times.index(t_sync)
     sync_axis = f"Axis{sync_axis_idx}"
+
+    axis_labels = [f"Axis{i}" for i in range(n_axes)]
+    print(f"Sync axis: {sync_axis} ({', '.join([f't_{axis_labels[i]}={t:.5f} s' for i, t in enumerate(times)])})")
+
     params = []
     for t_i in times:
         if t_i == 0:
@@ -218,23 +278,35 @@ def synchronize_multi_axis_motion(p1, p2):
     return result
 
 def calculate_board_movement_time(rectangles):
+    """
+    Calculate the total movement and scan time for a sequence of FOV rectangles.
+
+    Args:
+        rectangles (list[dict]): List of FOV rectangles with coordinates in meters.
+
+    Returns:
+        tuple: (total_time, segment_times) where total_time is the sum of all segments,
+               and segment_times is a list of (move_time, scan_time) tuples.
+    """
     ptp_times = 0
     radius = RADIUS
-    scan_times = calculate_scan_time(radius, verbose=True)
-    print(f"\n[Scan Time Per FOV] = {scan_times:.5f} seconds\n")
+    segment_times = []
+    scan_time = calculate_scan_time(radius, verbose=True)
+
     for i in range(1, len(rectangles)):
         axis_keys = [k for k in rectangles[i] if k.startswith('c')]
         prev = tuple(rectangles[i - 1][k] for k in axis_keys)
         curr = tuple(rectangles[i][k] for k in axis_keys)
         sync = synchronize_multi_axis_motion(prev, curr)
-        segment_time = sync['t_sync'] + scan_times
+        segment_time = sync['t_sync'] + scan_time
         print(f"[FOV {i}] Move from {prev} to {curr}")
         print(f"         Travel   = {sync['t_sync']:.5f} s")
-        print(f"         Scan     = {scan_times:.5f} s")
+        print(f"         Scan     = {scan_time:.5f} s")
         print(f"         Segment  = {segment_time:.5f} s\n")
         ptp_times += segment_time
+        segment_times.append((sync['t_sync'], scan_time))
     print(f"Total Movement + Scan Time = {ptp_times:.3f} seconds")
-    return ptp_times
+    return ptp_times, segment_times
 
 def load_FOV_from_csv(filename):
     import csv
@@ -246,6 +318,124 @@ def load_FOV_from_csv(filename):
             rect = {k: float(v) / 1e9 for k, v in row.items()}
             rectangles.append(rect)
     return rectangles
+
+def plot_motion_profile(rectangles):
+    t_full = []
+    pos_full = []
+    v_full = []
+    a_full = []
+    j_full = []
+    t_offset = 0
+    pos_offset = 0
+    phase_spans = []
+
+    for i in range(1, len(rectangles)):
+        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
+        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
+        curr = tuple(rectangles[i][k] for k in axis_keys)
+
+        sync = synchronize_multi_axis_motion(prev, curr)
+        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
+        params = sync[f'axis_{sync_axis}']
+        move_dist = params['dist']
+        move_jerk = params['jerk']
+        move_accel = params['accel']
+        move_vel = params['vel']
+
+        t_total_move, move_profile = calculate_travel_time(
+            move_dist, move_vel, move_accel, move_jerk
+        )
+        t_move = move_profile['t'] + t_offset
+        v_move = move_profile['v']
+        pos_move = np.cumsum(v_move) * (t_move[1] - t_move[0]) + pos_offset
+        a_move = np.zeros_like(v_move)
+        a_move[1:] = np.diff(v_move) / np.diff(t_move)
+        j_move = np.zeros_like(a_move)
+        j_move[1:] = np.diff(a_move) / np.diff(t_move)
+
+        t_full.append(t_move)
+        v_full.append(v_move)
+        pos_full.append(pos_move)
+        a_full.append(a_move)
+        j_full.append(j_move)
+        phase_spans.append((t_move[0], t_move[-1], 'move'))
+
+        t_offset = t_move[-1]
+        pos_offset = pos_move[-1]
+
+        scan_time, t_scan, v_scan = calculate_scan_time(RADIUS, return_profile=True)
+        t_scan = t_scan + t_offset
+        pos_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + pos_offset
+        a_scan = np.zeros_like(v_scan)
+        a_scan[1:] = np.diff(v_scan) / np.diff(t_scan)
+        j_scan = np.zeros_like(a_scan)
+        j_scan[1:] = np.diff(a_scan) / np.diff(t_scan)
+
+        t_full.append(t_scan)
+        v_full.append(v_scan)
+        pos_full.append(pos_scan)
+        a_full.append(a_scan)
+        j_full.append(j_scan)
+        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
+
+        t_offset = t_scan[-1]
+        pos_offset = pos_scan[-1]
+
+    t_full = np.concatenate(t_full)
+    pos_full = np.concatenate(pos_full)
+    v_full = np.concatenate(v_full)
+    a_full = np.concatenate(a_full)
+    j_full = np.concatenate(j_full)
+
+    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+    for start, end, phase in phase_spans:
+        color = '#ffeeba' if phase == 'move' else '#d4edda'
+        label = 'Move' if phase == 'move' else 'Scan'
+        for ax in axs.flat:
+            ax.axvspan(start, end, color=color, alpha=0.4, label=label if ax==axs[0,0] else "")
+
+    axs[0, 0].plot(t_full, pos_full, color='orange')
+    axs[0, 0].set_title("Position (m)")
+    axs[0, 0].set_xlabel("Time (s)")
+    axs[0, 0].set_ylabel("Position (m)")
+    axs[0, 0].grid(True)
+
+    axs[0, 1].plot(t_full, v_full, color='red')
+    axs[0, 1].set_title("Velocity (m/s)")
+    axs[0, 1].set_xlabel("Time (s)")
+    axs[0, 1].set_ylabel("Velocity (m/s)")
+    axs[0, 1].grid(True)
+
+    axs[1, 0].plot(t_full, a_full, color='blue')
+    axs[1, 0].set_title("Acceleration (m/s²)")
+    axs[1, 0].set_xlabel("Time (s)")
+    axs[1, 0].set_ylabel("Acceleration (m/s²)")
+    axs[1, 0].grid(True)
+
+    axs[1, 1].plot(t_full, j_full, color='green')
+    axs[1, 1].set_title("Jerk (m/s³)")
+    axs[1, 1].set_xlabel("Time (s)")
+    axs[1, 1].set_ylabel("Jerk (m/s³)")
+    axs[1, 1].grid(True)
+
+    handles, labels = axs[0,0].get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    axs[0,0].legend(by_label.values(), by_label.keys(), loc="upper right")
+
+    plt.tight_layout()
+    plt.savefig(f"Full_Motion_Profile.png") 
+    plt.show()
+
+
+if __name__ == "__main__":
+    rectangles = load_FOV_from_csv('FOV.csv')
+    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
+    radius=RADIUS, CycleTime=CycleTime, jerk=JERK, accel=ACCELERATION, velocity=VELOCITY
+)
+    total_time, segment_times = calculate_board_movement_time(rectangles)
+    plot_motion_profile(rectangles)
+
+
 
 # def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
 #     V_max = 2 * radius * PI / CycleTime  # m/s
@@ -442,119 +632,3 @@ def load_FOV_from_csv(filename):
 # plt.tight_layout()
 # plt.savefig(f"XY_SVA.png")  
 # plt.show()
-
-if __name__ == "__main__":
-    rectangles = load_FOV_from_csv('FOV.csv')
-
-    t_full = []
-    pos_full = []
-    v_full = []
-    a_full = []
-    j_full = []
-    t_offset = 0
-    pos_offset = 0
-    phase_spans = []  # To store (start, end, 'move'/'scan')
-
-    for i in range(1, len(rectangles)):
-        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
-        prev = tuple(rectangles[i - 1][k] for k in axis_keys)
-        curr = tuple(rectangles[i][k] for k in axis_keys)
-
-        # Multi-axis sync for this move
-        sync = synchronize_multi_axis_motion(prev, curr)
-        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
-        params = sync[f'axis_{sync_axis}']
-        move_dist = params['dist']
-        move_jerk = params['jerk']
-        move_accel = params['accel']
-        move_vel = params['vel']
-
-        # Move phase
-        t_total_move, move_profile = calculate_travel_time(
-            move_dist, move_vel, move_accel, move_jerk
-        )
-        t_move = move_profile['t'] + t_offset
-        v_move = move_profile['v']
-        pos_move = np.cumsum(v_move) * (t_move[1] - t_move[0]) + pos_offset
-        a_move = np.zeros_like(v_move)
-        a_move[1:] = np.diff(v_move) / np.diff(t_move)
-        j_move = np.zeros_like(a_move)
-        j_move[1:] = np.diff(a_move) / np.diff(t_move)
-
-        t_full.append(t_move)
-        v_full.append(v_move)
-        pos_full.append(pos_move)
-        a_full.append(a_move)
-        j_full.append(j_move)
-        phase_spans.append((t_move[0], t_move[-1], 'move'))
-
-        t_offset = t_move[-1]
-        pos_offset = pos_move[-1]
-
-        # Scan phase (scaled parameters)
-        scan_time, t_scan, v_scan = calculate_scan_time(RADIUS, return_profile=True)
-        t_scan = t_scan + t_offset
-        pos_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + pos_offset
-        a_scan = np.zeros_like(v_scan)
-        a_scan[1:] = np.diff(v_scan) / np.diff(t_scan)
-        j_scan = np.zeros_like(a_scan)
-        j_scan[1:] = np.diff(a_scan) / np.diff(t_scan)
-
-        t_full.append(t_scan)
-        v_full.append(v_scan)
-        pos_full.append(pos_scan)
-        a_full.append(a_scan)
-        j_full.append(j_scan)
-        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
-
-        t_offset = t_scan[-1]
-        pos_offset = pos_scan[-1]
-
-    # Concatenate all segments
-    t_full = np.concatenate(t_full)
-    pos_full = np.concatenate(pos_full)
-    v_full = np.concatenate(v_full)
-    a_full = np.concatenate(a_full)
-    j_full = np.concatenate(j_full)
-
-    # --- Plot ---
-    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-
-    # Phase backgrounds
-    for start, end, phase in phase_spans:
-        color = '#ffeeba' if phase == 'move' else '#d4edda'
-        label = 'Move' if phase == 'move' else 'Scan'
-        for ax in axs.flat:
-            ax.axvspan(start, end, color=color, alpha=0.4, label=label if ax==axs[0,0] else "")
-
-    axs[0, 0].plot(t_full, pos_full, color='orange')
-    axs[0, 0].set_title("Position (m)")
-    axs[0, 0].set_xlabel("Time (s)")
-    axs[0, 0].set_ylabel("Position (m)")
-    axs[0, 0].grid(True)
-
-    axs[0, 1].plot(t_full, v_full, color='red')
-    axs[0, 1].set_title("Velocity (m/s)")
-    axs[0, 1].set_xlabel("Time (s)")
-    axs[0, 1].set_ylabel("Velocity (m/s)")
-    axs[0, 1].grid(True)
-
-    axs[1, 0].plot(t_full, a_full, color='blue')
-    axs[1, 0].set_title("Acceleration (m/s²)")
-    axs[1, 0].set_xlabel("Time (s)")
-    axs[1, 0].set_ylabel("Acceleration (m/s²)")
-    axs[1, 0].grid(True)
-
-    axs[1, 1].plot(t_full, j_full, color='green')
-    axs[1, 1].set_title("Jerk (m/s³)")
-    axs[1, 1].set_xlabel("Time (s)")
-    axs[1, 1].set_ylabel("Jerk (m/s³)")
-    axs[1, 1].grid(True)
-
-    # Only show unique labels in legend
-    handles, labels = axs[0,0].get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    axs[0,0].legend(by_label.values(), by_label.keys(), loc="upper right")
-
-    plt.tight_layout()
-    plt.show()
