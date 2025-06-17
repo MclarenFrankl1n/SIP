@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import argparse
+import csv
 
 # PARAMETERS
 PI = np.pi
@@ -66,7 +68,7 @@ def calculate_scan_time(radius, verbose=False, return_profile=False):
     b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
     a = -b / ramp_time
 
-    cruise_distance = 2 * np.pi * radius
+    cruise_distance = 2 * np.pi * radius * num_rev
     cruise_time = cruise_distance / peak_vel
 
     t_up = np.arange(0, ramp_time, dt)
@@ -309,7 +311,6 @@ def calculate_board_movement_time(rectangles):
     return ptp_times, segment_times
 
 def load_FOV_from_csv(filename):
-    import csv
     rectangles = []
     with open(filename, newline='') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -426,15 +427,28 @@ def plot_motion_profile(rectangles):
     plt.savefig(f"Full_Motion_Profile.png") 
     plt.show()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Motion Profile Simulator")
+    parser.add_argument('--acceleration', type=float, default=5, help='Acceleration (m/s^2)')
+    parser.add_argument('--velocity', type=float, default=1, help='Velocity (m/s)')
+    parser.add_argument('--jerk', type=float, default=100, help='Jerk (m/s^3)')
+    parser.add_argument('--radius', type=float, default=0.10577, help='Radius (m)')
+    parser.add_argument('--expo', type=float, default=0.05, help='Exposure time (s)')
+    parser.add_argument('--proj', type=int, default=32, help='Number of projections')
+    parser.add_argument('--fov', type=str, default='FOV.csv', help='FOV CSV file')
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
-    rectangles = load_FOV_from_csv('FOV.csv')
+    args = parse_args()
+    # Use args.acceleration, args.velocity, etc.
+    CycleTime = args.expo * args.proj
+    rectangles = load_FOV_from_csv(args.fov)
     JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
-    radius=RADIUS, CycleTime=CycleTime, jerk=JERK, accel=ACCELERATION, velocity=VELOCITY
-)
+        radius=args.radius, CycleTime=CycleTime, jerk=args.jerk, accel=args.acceleration, velocity=args.velocity
+    )
     total_time, segment_times = calculate_board_movement_time(rectangles)
     plot_motion_profile(rectangles)
-
 
 
 # def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
