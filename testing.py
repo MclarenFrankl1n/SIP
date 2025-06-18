@@ -334,7 +334,7 @@ def plot_motion_profile(rectangles):
         axis_keys = [k for k in rectangles[i] if k.startswith('c')]
         prev = np.array([rectangles[i - 1][k] for k in axis_keys])
         curr = np.array([rectangles[i][k] for k in axis_keys])
-        delta = curr - prev 
+        delta = curr - prev  # Now this works!   
 
         sync = synchronize_multi_axis_motion(prev, curr)
         sync_axis = int(sync['sync_axis'].replace('Axis', ''))
@@ -347,6 +347,9 @@ def plot_motion_profile(rectangles):
         # Get the sign for the sync axis
         direction = np.sign(delta[sync_axis])
 
+        synced_velocity = move_vel * direction
+        print(f"Segment {i}: Synced velocity (axis {sync_axis}) = {synced_velocity:.6f} m/s")
+
         for axis_idx in range(len(axis_keys)):
             axis_params = sync[f'axis_{axis_idx}']
             axis_direction = np.sign(delta[axis_idx])
@@ -354,11 +357,12 @@ def plot_motion_profile(rectangles):
             print(f"  Axis {axis_idx}: velocity = {axis_velocity:.6f} m/s")
         print(f"Sync axis: {sync['sync_axis']} (velocity = {move_vel * direction:.6f} m/s)")
 
+        
         t_total_move, move_profile = calculate_travel_time(
             move_dist, move_vel, move_accel, move_jerk
         )
         t_move = move_profile['t'] + t_offset
-        v_move = move_profile['v'] * direction
+        v_move = move_profile['v'] * direction  # Apply direction to velocity
         pos_move = np.cumsum(v_move) * (t_move[1] - t_move[0]) + pos_offset
         a_move = np.zeros_like(v_move)
         a_move[1:] = np.diff(v_move) / np.diff(t_move)
@@ -375,23 +379,23 @@ def plot_motion_profile(rectangles):
         t_offset = t_move[-1]
         pos_offset = pos_move[-1]
 
-        scan_time, t_scan, v_scan = calculate_scan_time(RADIUS, return_profile=True)
-        t_scan = t_scan + t_offset
-        pos_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + pos_offset
-        a_scan = np.zeros_like(v_scan)
-        a_scan[1:] = np.diff(v_scan) / np.diff(t_scan)
-        j_scan = np.zeros_like(a_scan)
-        j_scan[1:] = np.diff(a_scan) / np.diff(t_scan)
+        # scan_time, t_scan, v_scan = calculate_scan_time(RADIUS, return_profile=True)
+        # t_scan = t_scan + t_offset
+        # pos_scan = np.cumsum(v_scan) * (t_scan[1] - t_scan[0]) + pos_offset
+        # a_scan = np.zeros_like(v_scan)
+        # a_scan[1:] = np.diff(v_scan) / np.diff(t_scan)
+        # j_scan = np.zeros_like(a_scan)
+        # j_scan[1:] = np.diff(a_scan) / np.diff(t_scan)
 
-        t_full.append(t_scan)
-        v_full.append(v_scan)
-        pos_full.append(pos_scan)
-        a_full.append(a_scan)
-        j_full.append(j_scan)
-        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
+        # t_full.append(t_scan)
+        # v_full.append(v_scan)
+        # pos_full.append(pos_scan)
+        # a_full.append(a_scan)
+        # j_full.append(j_scan)
+        # phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
 
-        t_offset = t_scan[-1]
-        pos_offset = pos_scan[-1]
+        # t_offset = t_scan[-1]
+        # pos_offset = pos_scan[-1]
 
     t_full = np.concatenate(t_full)
     pos_full = np.concatenate(pos_full)
