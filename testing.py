@@ -334,7 +334,7 @@ def plot_motion_profile(rectangles):
         axis_keys = [k for k in rectangles[i] if k.startswith('c')]
         prev = np.array([rectangles[i - 1][k] for k in axis_keys])
         curr = np.array([rectangles[i][k] for k in axis_keys])
-        delta = curr - prev  # Now this works!   
+        delta = curr - prev  
 
         sync = synchronize_multi_axis_motion(prev, curr)
         sync_axis = int(sync['sync_axis'].replace('Axis', ''))
@@ -346,9 +346,6 @@ def plot_motion_profile(rectangles):
 
         # Get the sign for the sync axis
         direction = np.sign(delta[sync_axis])
-
-        synced_velocity = move_vel * direction
-        print(f"Segment {i}: Synced velocity (axis {sync_axis}) = {synced_velocity:.6f} m/s")
 
         for axis_idx in range(len(axis_keys)):
             axis_params = sync[f'axis_{axis_idx}']
