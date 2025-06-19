@@ -510,8 +510,64 @@ def plot_motion_profile(rectangles):
     by_label = dict(zip(labels, handles))
     axs[0,0].legend(by_label.values(), by_label.keys(), loc="upper right")
 
+
+    # --- Compute and plot X and Y position for the full motion ---
+    axis_keys = [k for k in rectangles[0] if k.startswith('c')]
+    curr_pos = np.array([rectangles[0][axis_keys[0]], rectangles[0][axis_keys[1]]])
+    n_axes = len(axis_keys)
+    x_full = np.zeros_like(t_full)
+    y_full = np.zeros_like(t_full)
+
+    # Initialize curr_pos to the first rectangle's position
+
+    x_full[0] = curr_pos[0]
+    y_full[0] = curr_pos[1]
+    idx = 1
+
+    for i in range(1, len(rectangles)):
+        prev = np.array([rectangles[i - 1][k] for k in axis_keys])
+        curr = np.array([rectangles[i][k] for k in axis_keys])
+        delta = curr - prev
+        sync = synchronize_multi_axis_motion(prev, curr)
+        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
+        params = sync[f'axis_{sync_axis}']
+        move_dist = params['dist']
+        move_jerk = params['jerk']
+        move_accel = params['accel']
+        move_vel = params['vel']
+        direction = np.sign(delta)
+        t_total_move, move_profile = calculate_travel_time(
+            move_dist, move_vel, move_accel, move_jerk
+        )
+        v_move = move_profile['v']
+        t_move = move_profile['t']
+        for j in range(1, len(t_move)):
+            for axis in range(len(curr_pos)):
+                axis_vel = sync[f'axis_{axis}']['vel']
+                curr_pos[axis] = curr_pos[axis] + direction[axis] * axis_vel * (t_move[j] - t_move[j-1])
+            x_full[idx] = curr_pos[0]
+            y_full[idx] = curr_pos[1]
+            idx += 1
+        # Scan phase: keep position constant (or update if you want to simulate scan motion)
+        scan_time, t_scan, v_scan = calculate_scan_time(RADIUS, return_profile=True)
+        for j in range(1, len(t_scan)):
+            x_full[idx] = curr_pos[0]
+            y_full[idx] = curr_pos[1]
+            idx += 1
+
+    # If idx < len(x_full), fill the rest with the last position
+    x_full[idx:] = curr_pos[0]
+    y_full[idx:] = curr_pos[1]
+
+    plt.figure(figsize=(12, 5))
+    plt.plot(t_full, x_full, label='X Position (m)', color='blue')
+    plt.plot(t_full, y_full, label='Y Position (m)', color='red')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Position (m)')
+    plt.title('Actual X and Y Position vs Time (Full Motion)')
+    plt.legend()
+    plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f"Full_Motion_Profile_{int(args.expo*1000)}ms{args.proj}proj.png") 
     plt.show()
 
 def parse_args():
@@ -524,7 +580,7 @@ def parse_args():
     parser.add_argument('--radius', type=float, default=0.10577, help='Radius (m)')
     parser.add_argument('--expo', type=float, default=0.05, help='Exposure time (s)')
     parser.add_argument('--proj', type=int, default=32, help='Number of projections')
-    parser.add_argument('--fov', type=str, default='FOV.csv', help='FOV CSV file')
+    parser.add_argument('--fov', type=str, default='ScanTests.csv', help='FOV CSV file')
     return parser.parse_args()
 
 
