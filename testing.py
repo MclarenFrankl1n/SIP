@@ -42,7 +42,7 @@ def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
     print(f"Jerk = {J:.6f} m/s³, Acceleration = {A:.6f} m/s², Velocity = {V:.6f} m/s")
     return J, A, V
 
-def calculate_scan_time(radius, verbose=False, return_profile=False):
+def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=False):
     """
     Calculate the scan time for a circular motion profile based on the radius and predefined parameters.
 
@@ -75,21 +75,39 @@ def calculate_scan_time(radius, verbose=False, return_profile=False):
     t_cruise = np.arange(0, cruise_time, dt)
     t_down = np.arange(0, ramp_time, dt)
 
-    # Ramp-up
+    # --- Ramp-up phase ---
     accel_up = a * t_up**2 + b * t_up
     vel_up = np.zeros_like(t_up)
+    pos_up = np.zeros_like(t_up)
     for i in range(1, len(t_up)):
         vel_up[i] = vel_up[i-1] + accel_up[i-1] * dt
+        pos_up[i] = pos_up[i-1] + vel_up[i-1] * dt
+    jerk_up = np.zeros_like(t_up)
+    jerk_up[1:] = (accel_up[1:] - accel_up[:-1]) / dt
 
-    # Cruise
+    # Cruise position
+    accel_cruise = np.zeros_like(t_cruise)
     vel_cruise = np.ones_like(t_cruise) * vel_up[-1]
+    pos_cruise = np.zeros_like(t_cruise)
+    pos_cruise[0] = pos_up[-1]
+    for i in range(1, len(t_cruise)):
+        pos_cruise[i] = pos_cruise[i-1] + vel_cruise[i-1] * dt
+    jerk_cruise = np.zeros_like(t_cruise)
 
-    # Ramp-down
+        # --- Ramp-down phase (mirror of ramp-up) ---
     accel_down = -accel_up[::-1]
     vel_down = np.zeros_like(t_down)
+    pos_down = np.zeros_like(t_down)
     vel_down[0] = vel_cruise[-1]
+    pos_down[0] = pos_cruise[-1]
     for i in range(1, len(t_down)):
         vel_down[i] = vel_down[i-1] + accel_down[i-1] * dt
+        pos_down[i] = pos_down[i-1] + vel_down[i-1] * dt
+    jerk_down = np.zeros_like(t_down)
+    jerk_down[1:] = (accel_down[1:] - accel_down[:-1]) / dt
+
+    # Concatenate
+    pos = np.concatenate([pos_up[:-1], pos_cruise[:-1], pos_down])
 
     # Concatenate
     t = np.concatenate([
@@ -100,8 +118,66 @@ def calculate_scan_time(radius, verbose=False, return_profile=False):
     vel = np.concatenate([vel_up[:-1], vel_cruise[:-1], vel_down])
     total_time = t[-1]
 
+    accel = np.concatenate([accel_up[:-1], accel_cruise[:-1], accel_down])
+    vel = np.concatenate([vel_up[:-1], vel_cruise[:-1], vel_down])
+    pos = np.concatenate([pos_up[:-1], pos_cruise[:-1], pos_down])
+    jerk = np.concatenate([jerk_up[:-1], jerk_cruise[:-1], jerk_down])
+
+    if plot_xy:
+        degrees = np.degrees(pos / radius)
+        x_pos = radius * np.cos(np.radians(degrees))
+        y_pos = radius * np.sin(np.radians(degrees))
+        x_vel = vel * np.sin(np.radians(degrees))
+        y_vel = vel * np.cos(np.radians(degrees))
+        dt_local = t[1] - t[0]
+        x_accel = np.zeros_like(x_vel)
+        x_accel[1:] = (x_vel[1:] - x_vel[:-1]) / dt_local
+        x_accel[0] = x_accel[1]
+        y_accel = np.zeros_like(y_vel)
+        y_accel[1:] = (y_vel[1:] - y_vel[:-1]) / dt_local
+        y_accel[0] = y_accel[1]
+
+        t_rampup_end = t_up[-1]
+        t_cruise_end = t_rampup_end + t_cruise[-1]
+        t_rampdown_end = t_cruise_end + t_down[-1]
+
+        plt.figure(figsize=(12, 8))
+        plt.axvspan(0, t_rampup_end, color='#cce5ff', alpha=0.5, label='Ramp-up')
+        plt.axvspan(t_rampup_end, t_cruise_end, color='#d4edda', alpha=0.5, label='Cruise')
+        plt.axvspan(t_cruise_end, t_rampdown_end, color='#f8d7da', alpha=0.5, label='Ramp-down')
+        plt.plot(t, x_pos, label="X Position (m)", color='blue')
+        plt.plot(t, y_pos, label="Y Position (m)", color='red')
+        plt.plot(t, x_vel, label="X Velocity (m/s)", color='cyan', linestyle='--')
+        plt.plot(t, y_vel, label="Y Velocity (m/s)", color='magenta', linestyle='--')
+        plt.plot(t, x_accel, label="X Acceleration (m/s²)", color='green', linestyle=':')
+        plt.plot(t, y_accel, label="Y Acceleration (m/s²)", color='orange', linestyle=':')
+        plt.title("X/Y Position, Velocity, and Acceleration vs Time (Scan Phase)")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Value (SI Units)")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+                # --- Circular (tangential) motion plot ---
+        plt.figure(figsize=(10, 6))
+        plt.plot(t, accel, label="Circular Accel", color='blue')
+        plt.plot(t, vel, label="Circular Vel", color='red')
+        plt.plot(t, pos, label="Circular Pos", color='orange')
+        plt.plot(t, jerk, label="Circular Jerk", color='green')
+        plt.title("Circular Position, Velocity, Acceleration & Jerk")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Value (SI Units)")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
     if verbose:
         print(f"\n[Scan Time Per FOV] = {total_time:.5f} seconds\n")
+
+
+
     if return_profile:
         return total_time, t, vel
     return total_time
@@ -293,7 +369,7 @@ def calculate_board_movement_time(rectangles):
     ptp_times = 0
     radius = RADIUS
     segment_times = []
-    scan_time = calculate_scan_time(radius, verbose=True)
+    scan_time = calculate_scan_time(radius, verbose=True, plot_xy=True)
 
     for i in range(1, len(rectangles)):
         axis_keys = [k for k in rectangles[i] if k.startswith('c')]
@@ -334,7 +410,7 @@ def plot_motion_profile(rectangles):
         axis_keys = [k for k in rectangles[i] if k.startswith('c')]
         prev = np.array([rectangles[i - 1][k] for k in axis_keys])
         curr = np.array([rectangles[i][k] for k in axis_keys])
-        delta = curr - prev  
+        delta = curr - prev 
 
         sync = synchronize_multi_axis_motion(prev, curr)
         sync_axis = int(sync['sync_axis'].replace('Axis', ''))
@@ -354,12 +430,11 @@ def plot_motion_profile(rectangles):
             print(f"  Axis {axis_idx}: velocity = {axis_velocity:.6f} m/s")
         print(f"Sync axis: {sync['sync_axis']} (velocity = {move_vel * direction:.6f} m/s)")
 
-        
         t_total_move, move_profile = calculate_travel_time(
             move_dist, move_vel, move_accel, move_jerk
         )
         t_move = move_profile['t'] + t_offset
-        v_move = move_profile['v'] * direction  # Apply direction to velocity
+        v_move = move_profile['v'] * direction
         pos_move = np.cumsum(v_move) * (t_move[1] - t_move[0]) + pos_offset
         a_move = np.zeros_like(v_move)
         a_move[1:] = np.diff(v_move) / np.diff(t_move)
@@ -449,10 +524,8 @@ def parse_args():
     parser.add_argument('--radius', type=float, default=0.10577, help='Radius (m)')
     parser.add_argument('--expo', type=float, default=0.05, help='Exposure time (s)')
     parser.add_argument('--proj', type=int, default=32, help='Number of projections')
-    parser.add_argument('--fov', type=str, default='FOV.csv', help='FOV CSV file')
+    parser.add_argument('--fov', type=str, default='ScanTests.csv', help='FOV CSV file')
     return parser.parse_args()
-
-
 
 if __name__ == "__main__":
     args = parse_args()
