@@ -453,38 +453,38 @@ def plot_motion_profile(rectangles):
         t_offset = t_move[-1]
         pos_offset = pos_move[-1]  # Reset to FOV center for next move
 
-        scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True)
-        t_scan = t_scan + t_offset
-        theta = pos_scan / RADIUS
+        # scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True)
+        # t_scan = t_scan + t_offset
+        # theta = pos_scan / RADIUS
 
-        if sync_axis == 0:
-            pos_scan_sync = curr[0] + RADIUS * np.cos(theta)
-            v_scan_sync   = -v_scan * np.sin(theta)
-            a_scan_sync   = -a_scan * np.sin(theta)
-        elif sync_axis == 1:
-            pos_scan_sync = curr[1] + RADIUS * np.sin(theta)
-            v_scan_sync   =  v_scan * np.cos(theta)
-            a_scan_sync   =  a_scan * np.cos(theta)
-        else:
-            # For more axes, generalize as needed
-            pos_scan_sync = np.ones_like(t_scan) * curr[sync_axis]
-            v_scan_sync = np.zeros_like(t_scan)
-            a_scan_sync = np.zeros_like(t_scan)
+        # if sync_axis == 0:
+        #     pos_scan_sync = curr[0] + RADIUS * np.cos(theta)
+        #     v_scan_sync   = -v_scan * np.sin(theta)
+        #     a_scan_sync   = -a_scan * np.sin(theta)
+        # elif sync_axis == 1:
+        #     pos_scan_sync = curr[1] + RADIUS * np.sin(theta)
+        #     v_scan_sync   =  v_scan * np.cos(theta)
+        #     a_scan_sync   =  a_scan * np.cos(theta)
+        # else:
+        #     # For more axes, generalize as needed
+        #     pos_scan_sync = np.ones_like(t_scan) * curr[sync_axis]
+        #     v_scan_sync = np.zeros_like(t_scan)
+        #     a_scan_sync = np.zeros_like(t_scan)
 
-        pos_scan_sync = np.maximum(pos_scan_sync, 0)
+        # pos_scan_sync = np.maximum(pos_scan_sync, 0)
 
-        j_scan_sync = np.zeros_like(a_scan_sync)
-        j_scan_sync[1:] = np.diff(a_scan_sync) / np.diff(t_scan)
+        # j_scan_sync = np.zeros_like(a_scan_sync)
+        # j_scan_sync[1:] = np.diff(a_scan_sync) / np.diff(t_scan)
 
-        t_full.append(t_scan)
-        pos_full.append(pos_scan_sync)
-        v_full.append(v_scan_sync)
-        a_full.append(a_scan_sync)
-        j_full.append(j_scan_sync)
-        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
+        # t_full.append(t_scan)
+        # pos_full.append(pos_scan_sync)
+        # v_full.append(v_scan_sync)
+        # a_full.append(a_scan_sync)
+        # j_full.append(j_scan_sync)
+        # phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
 
-        t_offset = t_scan[-1]
-        pos_offset = curr[sync_axis]  # Reset to FOV center for next move
+        # t_offset = t_scan[-1]
+        # pos_offset = curr[sync_axis]  # Reset to FOV center for next move
 
     t_full = np.concatenate(t_full)
     pos_full = np.concatenate(pos_full)
@@ -545,7 +545,6 @@ def plot_xy_motion_profile(rectangles):
 
     axis_keys = [k for k in rectangles[0] if k.startswith('c')]
     curr_pos = np.array([rectangles[0][axis_keys[0]], rectangles[0][axis_keys[1]]])
-    n_axes = len(axis_keys)
     x_full = []
     y_full = []
 
@@ -554,35 +553,40 @@ def plot_xy_motion_profile(rectangles):
         curr = np.array([rectangles[i][k] for k in axis_keys])
         delta = curr - prev
 
-        # --- Use vector distance for coordinated motion ---
         vector_dist = np.linalg.norm(delta[:2])
         if vector_dist == 0:
             continue  # No move
 
-        # Generate the velocity profile for the vector move
+        # Generate velocity profile for the move
         t_total_move, move_profile = calculate_travel_time(
             vector_dist, VELOCITY, ACCELERATION, JERK
         )
         t_move = move_profile['t'] + t_offset
-        v_profile = move_profile['v']  # always positive
+        v_profile = move_profile['v']
 
-        # For each axis, scale by the signed ratio of delta to vector_dist
-        v_axes = np.zeros((len(t_move), 2))
-        for axis in range(2):
-            scale = delta[axis] / vector_dist  # signed
-            v_axes[:, axis] = v_profile * scale
+        # --- SCALE velocity profile so integrated distance matches vector_dist ---
+        dt = np.diff(t_move, prepend=t_move[0])
+        dist_integrated = np.sum(v_profile * dt)
+        scale = vector_dist / dist_integrated if dist_integrated != 0 else 1.0
+        v_profile_scaled = v_profile * scale
 
-        # Integrate velocities for positions
+        # Project velocity onto axes
+        direction = delta / vector_dist
+        v_axes = np.outer(v_profile_scaled, direction)
+
+        # Integrate for position
         x = np.zeros_like(t_move)
         y = np.zeros_like(t_move)
         x[0] = curr_pos[0]
         y[0] = curr_pos[1]
         for j in range(1, len(t_move)):
-            dt = t_move[j] - t_move[j-1]
-            x[j] = x[j-1] + v_axes[j-1, 0] * dt
-            y[j] = y[j-1] + v_axes[j-1, 1] * dt
+            dt_j = t_move[j] - t_move[j-1]
+            x[j] = x[j-1] + v_axes[j-1, 0] * dt_j
+            y[j] = y[j-1] + v_axes[j-1, 1] * dt_j
 
-        # Compute accelerations
+        # No linear correction needed!
+        # x[-1] and y[-1] will match curr after scaling
+
         ax = np.zeros_like(t_move)
         ay = np.zeros_like(t_move)
         ax[1:] = np.diff(v_axes[:, 0]) / np.diff(t_move)
@@ -597,7 +601,7 @@ def plot_xy_motion_profile(rectangles):
         ay_full.append(ay)
         phase_spans.append((t_move[0], t_move[-1], 'move'))
 
-        # --- Buffer after move ---
+        # Buffer after move
         dt_buf = t_move[1] - t_move[0] if len(t_move) > 1 else 0.001
         t_buf = np.arange(t_move[-1] + dt_buf, t_move[-1] + BUFFER_TIME + dt_buf, dt_buf)
         if len(t_buf) > 0:
@@ -612,47 +616,11 @@ def plot_xy_motion_profile(rectangles):
             t_offset = t_buf[-1]
         else:
             t_offset = t_move[-1]
-        curr_pos = np.array([x[-1], y[-1]])
-
-        # --- Scan phase: use the actual scan profile ---
-        scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True)
-        t_scan = t_scan + t_offset
-        theta = pos_scan / RADIUS  # radians
-
-        x_scan = rectangles[i][axis_keys[0]] + RADIUS * np.cos(theta)
-        y_scan = rectangles[i][axis_keys[1]] + RADIUS * np.sin(theta)
-        x_scan = np.maximum(x_scan, 0)
-        y_scan = np.maximum(y_scan, 0)
-        vx_scan = -v_scan * np.sin(theta)
-        vy_scan =  v_scan * np.cos(theta)
-        ax_scan = -a_scan * np.sin(theta)
-        ay_scan =  a_scan * np.cos(theta)
-
-        t_full.append(t_scan)
-        x_full.append(x_scan)
-        y_full.append(y_scan)
-        vx_full.append(vx_scan)
-        vy_full.append(vy_scan)
-        ax_full.append(ax_scan)
-        ay_full.append(ay_scan)
-        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
-
-        # --- Buffer after scan ---
-        dt_buf2 = t_scan[1] - t_scan[0] if len(t_scan) > 1 else 0.001
-        t_buf2 = np.arange(t_scan[-1] + dt_buf2, t_scan[-1] + BUFFER_TIME + dt_buf2, dt_buf2)
-        if len(t_buf2) > 0:
-            t_full.append(t_buf2)
-            x_full.append(np.ones_like(t_buf2) * x_scan[-1])
-            y_full.append(np.ones_like(t_buf2) * y_scan[-1])
-            vx_full.append(np.zeros_like(t_buf2))
-            vy_full.append(np.zeros_like(t_buf2))
-            ax_full.append(np.zeros_like(t_buf2))
-            ay_full.append(np.zeros_like(t_buf2))
-            phase_spans.append((t_buf2[0], t_buf2[-1], 'buffer'))
-            t_offset = t_buf2[-1]
+        # Always use the last value of the buffer for curr_pos
+        if len(t_buf) > 0:
+            curr_pos = np.array([x_full[-1][-1], y_full[-1][-1]])
         else:
-            t_offset = t_scan[-1]
-        curr_pos = np.array([rectangles[i][axis_keys[0]], rectangles[i][axis_keys[1]]])
+            curr_pos = np.array([x[-1], y[-1]])
 
     t_full = np.concatenate(t_full)
     x_full = np.concatenate(x_full)
@@ -707,7 +675,6 @@ def plot_xy_motion_profile(rectangles):
     plt.tight_layout()
     plt.show()
 
-    
 def parse_args():
     parser = argparse.ArgumentParser(
     description="CycleTime and Motion Profile Calculation for Circular Motion"
@@ -721,7 +688,6 @@ def parse_args():
     parser.add_argument('--fov', type=str, default='ScanTests.csv', help='FOV CSV file')
     return parser.parse_args()
 
-
 if __name__ == "__main__":
     args = parse_args()
     CycleTime = args.expo * args.proj
@@ -729,6 +695,6 @@ if __name__ == "__main__":
     JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
         radius=args.radius, CycleTime=CycleTime, jerk=args.jerk, accel=args.acceleration, velocity=args.velocity
     )
-    total_time, segment_times = calculate_board_movement_time(rectangles)
-    plot_motion_profile(rectangles)
+    # total_time, segment_times = calculate_board_movement_time(rectangles)
+    # plot_motion_profile(rectangles)
     plot_xy_motion_profile(rectangles)
