@@ -533,12 +533,12 @@ def load_FOV_from_csv(filename):
 
 if __name__ == "__main__":
     # print("\n--- Triangular Ramp ---")
-    # calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
+    calculate_triangular_ramp_up_down_time(VELOCITY, JERK)
 
-    rectangles = load_FOV_from_csv('FOV.csv')
-    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(radius=105_770_000, CycleTime=CYCLE_TIME)
+    rectangles = load_FOV_from_csv('ScanTests.csv')
+    JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(radius=100_000_000, CycleTime=CYCLE_TIME)
     calculate_board_movement_time(rectangles)
-    scan_times = calculate_scan_time(radius=105_770_000, verbose=True)  # or whatever radius you use
+    scan_times = calculate_scan_time(radius=100_000_000, verbose=True)  # or whatever radius you use
     plot_full_motion_profile(rectangles, scan_times)  # View only the first 2 seconds
-    scan_times = calculate_scan_time(radius=105_770_000, verbose=True)
+    scan_times = calculate_scan_time(radius=100_000_000, verbose=True)
     plot_scan_phase(CYCLE_TIME, velocity=VELOCITY_S, acceleration=ACCELERATION_S, jerk=JERK_S)
