@@ -116,7 +116,7 @@ def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=Fal
     """
 
     peak_vel = VELOCITY_S
-    peak_accel = ACCELERATION_S
+    peak_accel = ACCELERATION
     parabolic_ratio = 2/3
 
     ramp_time = peak_vel / (peak_accel * parabolic_ratio)
@@ -124,8 +124,13 @@ def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=Fal
     b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
     a = -b / ramp_time
 
+    print(f"Ramp time = {ramp_time:.5f} s")
+    print(f"Total ramp time (up + down) = {2 * ramp_time:.5f} s")
+  
+
     cruise_distance = 2 * np.pi * radius * num_rev
     cruise_time = cruise_distance / peak_vel
+    print(f"Total scan time (ramp + cruise + ramp) = {2 * ramp_time + cruise_time:.5f} s")
 
     t_up = np.arange(0, ramp_time, dt)
     t_cruise = np.arange(0, cruise_time, dt)
@@ -589,7 +594,7 @@ def plot_motion_profile(rectangles):
 
 
 def plot_xy_motion_profile(rectangles):
-    BUFFER_TIME = 0.2  # seconds
+    BUFFER_TIME = 0  # seconds
 
     t_full = []
     vx_full = []
@@ -613,55 +618,102 @@ def plot_xy_motion_profile(rectangles):
         if vector_dist == 0:
             continue  # No move
 
-        # Generate velocity profile for the move
-        t_total_move, move_profile = calculate_travel_time(
-            vector_dist, VELOCITY, ACCELERATION, JERK
-        )
-        t_move = move_profile['t'] + t_offset
-        v_profile = move_profile['v']
+        # # Generate velocity profile for the move
+        # t_total_move, move_profile = calculate_travel_time(
+        #     vector_dist, VELOCITY, ACCELERATION, JERK
+        # )
+        # t_move = move_profile['t'] + t_offset
+        # v_profile = move_profile['v']
 
-        # --- SCALE velocity profile so integrated distance matches vector_dist ---
-        dt = np.diff(t_move, prepend=t_move[0])
-        dist_integrated = np.sum(v_profile * dt)
-        scale = vector_dist / dist_integrated if dist_integrated != 0 else 1.0
-        v_profile_scaled = v_profile * scale
+        # # --- SCALE velocity profile so integrated distance matches vector_dist ---
+        # dt = np.diff(t_move, prepend=t_move[0])
+        # dist_integrated = np.sum(v_profile * dt)
+        # scale = vector_dist / dist_integrated if dist_integrated != 0 else 1.0
+        # v_profile_scaled = v_profile * scale
 
-        # Project velocity onto axes
-        direction = delta / vector_dist
-        v_axes = np.outer(v_profile_scaled, direction)
+        # # Project velocity onto axes
+        # direction = delta / vector_dist
+        # v_axes = np.outer(v_profile_scaled, direction)
 
-        # Integrate for position
-        x = np.zeros_like(t_move)
-        y = np.zeros_like(t_move)
-        x[0] = curr_pos[0]
-        y[0] = curr_pos[1]
-        for j in range(1, len(t_move)):
-            dt_j = t_move[j] - t_move[j-1]
-            x[j] = x[j-1] + v_axes[j-1, 0] * dt_j
-            y[j] = y[j-1] + v_axes[j-1, 1] * dt_j
+        # # Integrate for position
+        # x = np.zeros_like(t_move)
+        # y = np.zeros_like(t_move)
+        # x[0] = curr_pos[0]
+        # y[0] = curr_pos[1]
+        # for j in range(1, len(t_move)):
+        #     dt_j = t_move[j] - t_move[j-1]
+        #     x[j] = x[j-1] + v_axes[j-1, 0] * dt_j
+        #     y[j] = y[j-1] + v_axes[j-1, 1] * dt_j
 
 
-        ax = np.zeros_like(t_move)
-        ay = np.zeros_like(t_move)
-        ax[1:] = np.diff(v_axes[:, 0]) / np.diff(t_move)
-        ay[1:] = np.diff(v_axes[:, 1]) / np.diff(t_move)
+        # ax = np.zeros_like(t_move)
+        # ay = np.zeros_like(t_move)
+        # ax[1:] = np.diff(v_axes[:, 0]) / np.diff(t_move)
+        # ay[1:] = np.diff(v_axes[:, 1]) / np.diff(t_move)
 
-        t_full.append(t_move)
-        x_full.append(x)
-        y_full.append(y)
-        vx_full.append(v_axes[:, 0])
-        vy_full.append(v_axes[:, 1])
-        ax_full.append(ax)
-        ay_full.append(ay)
-        phase_spans.append((t_move[0], t_move[-1], 'move'))
+        # t_full.append(t_move)
+        # x_full.append(x)
+        # y_full.append(y)
+        # vx_full.append(v_axes[:, 0])
+        # vy_full.append(v_axes[:, 1])
+        # ax_full.append(ax)
+        # ay_full.append(ay)
+        # phase_spans.append((t_move[0], t_move[-1], 'move'))
 
-        # Buffer after move
-        dt_buf = t_move[1] - t_move[0] if len(t_move) > 1 else 0.001
-        t_buf = np.arange(t_move[-1] + dt_buf, t_move[-1] + BUFFER_TIME + dt_buf, dt_buf)
+        # # Buffer after move
+        # dt_buf = t_move[1] - t_move[0] if len(t_move) > 1 else 0.001
+        # t_buf = np.arange(t_move[-1] + dt_buf, t_move[-1] + BUFFER_TIME + dt_buf, dt_buf)
+        # if len(t_buf) > 0:
+        #     t_full.append(t_buf)
+        #     x_full.append(np.ones_like(t_buf) * x[-1])
+        #     y_full.append(np.ones_like(t_buf) * y[-1])
+        #     vx_full.append(np.zeros_like(t_buf))
+        #     vy_full.append(np.zeros_like(t_buf))
+        #     ax_full.append(np.zeros_like(t_buf))
+        #     ay_full.append(np.zeros_like(t_buf))
+        #     phase_spans.append((t_buf[0], t_buf[-1], 'buffer'))
+        #     t_offset = t_buf[-1]
+        # else:
+        #     t_offset = t_move[-1]
+        # # Always use the last value of the buffer for curr_pos
+        # if len(t_buf) > 0:
+        #     curr_pos = np.array([x_full[-1][-1], y_full[-1][-1]])
+        # else:
+        #     curr_pos = np.array([x[-1], y[-1]])
+
+        # --- Scan phase after buffer ---
+        scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True)
+        t_scan = t_scan + t_offset
+
+        # Circular arc: theta in radians
+        theta = pos_scan / RADIUS
+        x_scan = curr[0] + RADIUS * np.cos(theta)
+        y_scan = curr[1] + RADIUS * np.sin(theta)
+        vx_scan = -v_scan * np.sin(theta)
+        vy_scan = v_scan * np.cos(theta)
+        ax_scan = -a_scan * np.sin(theta)
+        ay_scan = a_scan * np.cos(theta)
+
+        t_full.append(t_scan)
+        x_full.append(x_scan)
+        y_full.append(y_scan)
+        vx_full.append(vx_scan)
+        vy_full.append(vy_scan)
+        ax_full.append(ax_scan)
+        ay_full.append(ay_scan)
+        phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
+
+        t_offset = t_scan[-1]
+        # End of scan is back at FOV center
+        curr_pos = np.array([curr[0], curr[1]])
+
+        # --- Buffer after scan phase ---
+        dt_buf = t_scan[1] - t_scan[0] if len(t_scan) > 1 else 0.001
+        t_buf = np.arange(t_scan[-1] + dt_buf, t_scan[-1] + BUFFER_TIME + dt_buf, dt_buf)
         if len(t_buf) > 0:
             t_full.append(t_buf)
-            x_full.append(np.ones_like(t_buf) * x[-1])
-            y_full.append(np.ones_like(t_buf) * y[-1])
+            x_full.append(np.ones_like(t_buf) * curr_pos[0])
+            y_full.append(np.ones_like(t_buf) * curr_pos[1])
             vx_full.append(np.zeros_like(t_buf))
             vy_full.append(np.zeros_like(t_buf))
             ax_full.append(np.zeros_like(t_buf))
@@ -669,38 +721,7 @@ def plot_xy_motion_profile(rectangles):
             phase_spans.append((t_buf[0], t_buf[-1], 'buffer'))
             t_offset = t_buf[-1]
         else:
-            t_offset = t_move[-1]
-        # Always use the last value of the buffer for curr_pos
-        if len(t_buf) > 0:
-            curr_pos = np.array([x_full[-1][-1], y_full[-1][-1]])
-        else:
-            curr_pos = np.array([x[-1], y[-1]])
-
-        # # --- Scan phase after buffer ---
-        # scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True)
-        # t_scan = t_scan + t_offset
-
-        # # Circular arc: theta in radians
-        # theta = pos_scan / RADIUS
-        # x_scan = curr[0] + RADIUS * np.cos(theta)
-        # y_scan = curr[1] + RADIUS * np.sin(theta)
-        # vx_scan = -v_scan * np.sin(theta)
-        # vy_scan = v_scan * np.cos(theta)
-        # ax_scan = -a_scan * np.sin(theta)
-        # ay_scan = a_scan * np.cos(theta)
-
-        # t_full.append(t_scan)
-        # x_full.append(x_scan)
-        # y_full.append(y_scan)
-        # vx_full.append(vx_scan)
-        # vy_full.append(vy_scan)
-        # ax_full.append(ax_scan)
-        # ay_full.append(ay_scan)
-        # phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
-
-        # t_offset = t_scan[-1]
-        # # End of scan is back at FOV center
-        # curr_pos = np.array([curr[0], curr[1]])
+            t_offset = t_scan[-1]
 
 
     t_full = np.concatenate(t_full)
