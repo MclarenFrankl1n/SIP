@@ -42,6 +42,62 @@ def calculate_maximum_velocity(radius, CycleTime, jerk, accel, velocity):
     print(f"Jerk = {J:.6f} m/s³, Acceleration = {A:.6f} m/s², Velocity = {V:.6f} m/s")
     return J, A, V
 
+def calculate_triangular_ramp_up_down_time(v_target, j_max):
+    """
+    Compute ramp-up and ramp-down time assuming triangular motion profile.
+    (No constant acceleration, just jerk up and down)
+    
+    Parameters:
+    - v_target: Target cruise velocity [nm/s]
+    - j_max: Maximum jerk [nm/s³]
+
+    Returns:
+    - t_ramp: Time to ramp up or ramp down [s]
+    - s_ramp: Distance traveled during the ramp phase [nm]
+    """
+    # formula: t_j = sqrt(2*v_target/j_max)
+    t_j = (2 * v_target / j_max) ** 0.5
+    s_ramp = (1/3) * j_max * t_j**3   # Total distance covered during ramp phase
+
+    print(f"Jerk-up time (t_j): {t_j:.5f} s")
+    print(f"Jerk-down time (t_j): {t_j:.5f} s")
+    print(f"Total ramp-up or ramp-down time: {2*t_j:.5f} s")
+    print(f"Total ramp (up+down) time: {4*t_j:.5f} s")
+    print(f"s_ramp (distance during ramp): {s_ramp/1e6:.1f} mm")
+    return 4 * t_j, s_ramp  # Total ramp time (jerk up + down)
+
+def calculate_bang_bang_time(v_target, a_max):
+    """
+    Bang-bang (instantaneous acceleration) profile.
+    Time to reach v_target: t = v_target / a_max
+    Total up+down time: 2t
+    """
+    t = v_target / a_max
+    print(f"[Bang-bang] Time to reach v_target: {t:.5f} s")
+    print(f"[Bang-bang] Total up+down time: {2*t:.5f} s")
+    return 2*t
+
+def calculate_trapezoidal_time(v_target, a_max, j_max):
+    """
+    Trapezoidal (acceleration-limited, optionally jerk-limited) profile.
+    If jerk is not limiting, time to reach v_target: t = v_target / a_max (same as bang-bang).
+    If jerk is limiting, use jerk-limited profile.
+    """
+    # Check if jerk is limiting
+    t_j = a_max / j_max
+    v_j = 0.5 * j_max * t_j**2
+    if v_target <= 2 * v_j:
+        # Jerk-limited triangular
+        t = (2 * v_target / j_max) ** 0.5
+        print(f"[Trapezoidal] Jerk-limited (triangular): t_j={t:.5f} s, total={4*t:.5f} s")
+        return 4*t
+    else:
+        # Trapezoidal: jerk up, accel, jerk down
+        t_accel = (v_target - v_j) / a_max
+        total_time = 2 * (t_j + t_accel)
+        print(f"[Trapezoidal] t_j={t_j:.5f} s, t_accel={t_accel:.5f} s, total={total_time:.5f} s")
+        return total_time
+
 def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=False):
     """
     Calculate the scan time for a circular motion profile based on the radius and predefined parameters.
@@ -149,8 +205,8 @@ def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=Fal
         plt.plot(t, y_pos, label="Y Position (m)", color='red')
         plt.plot(t, x_vel, label="X Velocity (m/s)", color='cyan', linestyle='--')
         plt.plot(t, y_vel, label="Y Velocity (m/s)", color='magenta', linestyle='--')
-        plt.plot(t, x_accel, label="X Acceleration (m/s²)", color='green', linestyle=':')
-        plt.plot(t, y_accel, label="Y Acceleration (m/s²)", color='orange', linestyle=':')
+        # plt.plot(t, x_accel, label="X Acceleration (m/s²)", color='green', linestyle=':')
+        # plt.plot(t, y_accel, label="Y Acceleration (m/s²)", color='orange', linestyle=':')
         plt.title("X/Y Position, Velocity, and Acceleration vs Time (Scan Phase)")
         plt.xlabel("Time (s)")
         plt.ylabel("Value (SI Units)")
@@ -584,8 +640,6 @@ def plot_xy_motion_profile(rectangles):
             x[j] = x[j-1] + v_axes[j-1, 0] * dt_j
             y[j] = y[j-1] + v_axes[j-1, 1] * dt_j
 
-        # No linear correction needed!
-        # x[-1] and y[-1] will match curr after scaling
 
         ax = np.zeros_like(t_move)
         ay = np.zeros_like(t_move)
@@ -621,6 +675,33 @@ def plot_xy_motion_profile(rectangles):
             curr_pos = np.array([x_full[-1][-1], y_full[-1][-1]])
         else:
             curr_pos = np.array([x[-1], y[-1]])
+
+        # # --- Scan phase after buffer ---
+        # scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True)
+        # t_scan = t_scan + t_offset
+
+        # # Circular arc: theta in radians
+        # theta = pos_scan / RADIUS
+        # x_scan = curr[0] + RADIUS * np.cos(theta)
+        # y_scan = curr[1] + RADIUS * np.sin(theta)
+        # vx_scan = -v_scan * np.sin(theta)
+        # vy_scan = v_scan * np.cos(theta)
+        # ax_scan = -a_scan * np.sin(theta)
+        # ay_scan = a_scan * np.cos(theta)
+
+        # t_full.append(t_scan)
+        # x_full.append(x_scan)
+        # y_full.append(y_scan)
+        # vx_full.append(vx_scan)
+        # vy_full.append(vy_scan)
+        # ax_full.append(ax_scan)
+        # ay_full.append(ay_scan)
+        # phase_spans.append((t_scan[0], t_scan[-1], 'scan'))
+
+        # t_offset = t_scan[-1]
+        # # End of scan is back at FOV center
+        # curr_pos = np.array([curr[0], curr[1]])
+
 
     t_full = np.concatenate(t_full)
     x_full = np.concatenate(x_full)
@@ -690,11 +771,39 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    CycleTime = args.expo * args.proj
-    rectangles = load_FOV_from_csv(args.fov)
     JERK_S, ACCELERATION_S, VELOCITY_S = calculate_maximum_velocity(
         radius=args.radius, CycleTime=CycleTime, jerk=args.jerk, accel=args.acceleration, velocity=args.velocity
     )
+    ACCELERATION = args.acceleration
+    JERK = args.jerk
+    VELOCITY = args.velocity
+    RADIUS = args.radius
+
+
+    # print("\n--- Bang-bang (acceleration-limited, no jerk) ---")
+    # calculate_bang_bang_time(v_target, a_max)
+
+    # print("\n--- Trapezoidal (acceleration-limited, with jerk) ---")
+    # calculate_trapezoidal_time(v_target, a_max, j_max)
+
+    # print("\n--- Jerk-limited (triangular) ---")
+    # calculate_triangular_ramp_up_down_time(v_target, j_max)
+
+
+    CycleTime = args.expo * args.proj
+    rectangles = load_FOV_from_csv(args.fov)
+    scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True, plot_xy=True)
     # total_time, segment_times = calculate_board_movement_time(rectangles)
     # plot_motion_profile(rectangles)
     plot_xy_motion_profile(rectangles)
+
+    # v_target = 0.392699  # m/s
+    # t_measured = 0.118  # s (total up+down)
+    # t_j = t_measured / 4
+    # j_measured = 2 * v_target / (t_j ** 2)
+    # print(f"Effective jerk: {j_measured:.2f} m/s³")
+
+    # v_target = 0.392699  # m/s
+    # t_measured = 0.059  # s (half ramp, since up+down = 0.118s)
+    # a_measured = v_target / t_measured
+    # print(f"Effective acceleration: {a_measured:.2f} m/s²")
