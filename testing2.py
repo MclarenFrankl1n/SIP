@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import csv
+import pandas as pd
+from scipy.interpolate import interp1d
 
 # PARAMETERS
 PI = np.pi
@@ -124,11 +126,14 @@ def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=Fal
     b = peak_accel / (half_ramp_time - (half_ramp_time**2) / ramp_time)
     a = -b / ramp_time
 
+    ramp_distance = ((peak_vel ** 2) / (2 * peak_accel * parabolic_ratio))
+
     print(f"Ramp time = {ramp_time:.5f} s")
     print(f"Total ramp time (up + down) = {2 * ramp_time:.5f} s")
   
 
     cruise_distance = 2 * np.pi * radius * num_rev
+    print(f"Cruise distance = {cruise_distance:.5f} m")
     cruise_time = cruise_distance / peak_vel
     print(f"Total scan time (ramp + cruise + ramp) = {2 * ramp_time + cruise_time:.5f} s")
 
@@ -593,7 +598,7 @@ def plot_motion_profile(rectangles):
     plt.show()
 
 
-def plot_xy_motion_profile(rectangles):
+def plot_xy_motion_profile(rectangles, args):
     BUFFER_TIME = 0  # seconds
 
     t_full = []
@@ -777,9 +782,101 @@ def plot_xy_motion_profile(rectangles):
     plt.tight_layout()
     plt.show()
 
+    # --- Verification with measured Excel data ---
+
+    if args.measured:
+        measured_df = pd.read_csv(args.measured, header=2)
+        start = args.cycle_start
+        end = args.cycle_end if args.cycle_end is not None else None
+        measured_time = measured_df['Cycle'].values[start:end] / 1000.0  # ms to s
+        measured_x = measured_df['CommandPos-0'].values[start:end] / 1e9
+        measured_y = measured_df['CommandPos-1'].values[start:end] / 1e9
+        measured_vx = measured_df['CommandVelocity-0'].values[start:end] / 1e9
+        measured_vy = measured_df['CommandVelocity-1'].values[start:end] / 1e9
+
+        # Align measured time to start at the same point as simulated scan
+        measured_time_aligned = measured_time - measured_time[0] + t_full[0]
+
+        plt.figure(figsize=(12, 5))
+
+        # --- Overlay X/Y Position ---
+        plt.subplot(1, 2, 1)
+        plt.plot(t_full, x_full, label='Simulated X', color='blue', linestyle='--')
+        plt.plot(t_full, y_full, label='Simulated Y', color='green', linestyle='--')
+        plt.plot(measured_time_aligned, measured_x, label='Measured X', color='red')
+        plt.plot(measured_time_aligned, measured_y, label='Measured Y', color='orange')
+        plt.title('X/Y Position (Measured & Simulated)')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Position (m)')
+        plt.legend()
+        plt.grid(True)
+
+        # --- Overlay X/Y Velocity ---
+        plt.subplot(1, 2, 2)
+        plt.plot(t_full, vx_full, label='Simulated VX', color='blue', linestyle='--')
+        plt.plot(t_full, vy_full, label='Simulated VY', color='green', linestyle='--')
+        plt.plot(measured_time_aligned, measured_vx, label='Measured VX', color='red')
+        plt.plot(measured_time_aligned, measured_vy, label='Measured VY', color='orange')
+        plt.title('X/Y Velocity (Measured & Simulated)')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Velocity (m/s)')
+        plt.legend()
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+        # --- Calculate and plot percentage differences ---
+
+        # Interpolate simulated data onto measured time base
+        interp_x = interp1d(t_full, x_full, bounds_error=False, fill_value="extrapolate")
+        interp_y = interp1d(t_full, y_full, bounds_error=False, fill_value="extrapolate")
+        interp_vx = interp1d(t_full, vx_full, bounds_error=False, fill_value="extrapolate")
+        interp_vy = interp1d(t_full, vy_full, bounds_error=False, fill_value="extrapolate")
+
+        sim_x_on_meas = interp_x(measured_time_aligned)
+        sim_y_on_meas = interp_y(measured_time_aligned)
+        sim_vx_on_meas = interp_vx(measured_time_aligned)
+        sim_vy_on_meas = interp_vy(measured_time_aligned)
+
+        # Avoid division by zero
+        sim_x_on_meas[sim_x_on_meas == 0] = np.nan
+        sim_y_on_meas[sim_y_on_meas == 0] = np.nan
+        sim_vx_on_meas[sim_vx_on_meas == 0] = np.nan
+        sim_vy_on_meas[sim_vy_on_meas == 0] = np.nan
+
+        # Calculate percentage difference
+        percent_diff_x = 100 * (measured_x - sim_x_on_meas) / sim_x_on_meas
+        percent_diff_y = 100 * (measured_y - sim_y_on_meas) / sim_y_on_meas
+        percent_diff_vx = 100 * (measured_vx - sim_vx_on_meas) / sim_vx_on_meas
+        percent_diff_vy = 100 * (measured_vy - sim_vy_on_meas) / sim_vy_on_meas
+
+        plt.figure(figsize=(12, 8))
+
+        plt.subplot(2, 1, 1)
+        plt.plot(measured_time_aligned, percent_diff_x, label='X Position % Diff', color='blue')
+        plt.plot(measured_time_aligned, percent_diff_y, label='Y Position % Diff', color='green')
+        plt.title('Percentage Difference: Position (Measured vs Simulated)')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Percent Difference (%)')
+        plt.legend()
+        plt.grid(True)
+
+        plt.subplot(2, 1, 2)
+        plt.plot(measured_time_aligned, percent_diff_vx, label='X Velocity % Diff', color='red')
+        plt.plot(measured_time_aligned, percent_diff_vy, label='Y Velocity % Diff', color='orange')
+        plt.title('Percentage Difference: Velocity (Measured vs Simulated)')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Percent Difference (%)')
+        plt.legend()
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+    
 def parse_args():
     parser = argparse.ArgumentParser(
-    description="CycleTime and Motion Profile Calculation for Circular Motion"
+        description="CycleTime and Motion Profile Calculation for Circular Motion"
     )
     parser.add_argument('--acceleration', type=float, default=5, help='Acceleration (m/s^2)')
     parser.add_argument('--velocity', type=float, default=1, help='Velocity (m/s)')
@@ -788,6 +885,9 @@ def parse_args():
     parser.add_argument('--expo', type=float, default=0.05, help='Exposure time (s)')
     parser.add_argument('--proj', type=int, default=32, help='Number of projections')
     parser.add_argument('--fov', type=str, default='ScanTests.csv', help='FOV CSV file')
+    parser.add_argument('--measured', type=str, default=None, help='Measured CSV file for verification')
+    parser.add_argument('--cycle_start', type=int, default=0, help='Row index to start the cycle in measured data')
+    parser.add_argument('--cycle_end', type=int, default=None, help='Row index to end the cycle in measured data (exclusive)')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -816,7 +916,7 @@ if __name__ == "__main__":
     scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True, plot_xy=True)
     # total_time, segment_times = calculate_board_movement_time(rectangles)
     # plot_motion_profile(rectangles)
-    plot_xy_motion_profile(rectangles)
+    plot_xy_motion_profile(rectangles, args)
 
     # v_target = 0.392699  # m/s
     # t_measured = 0.118  # s (total up+down)
