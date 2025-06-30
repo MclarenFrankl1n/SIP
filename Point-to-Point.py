@@ -31,8 +31,42 @@ parabolic_ratio = 2/3
 dt = 0.001
 num_rev = 1.0
 
+def calculate_travel_time_trapezoidal(distance, v_max, a_max, resolution=1000):
+    # Calculate ramp time and distance
+    t_ramp = v_max / a_max
+    s_ramp = 0.5 * a_max * t_ramp**2
 
-def calculate_travel_time_SCurve(distance, v_max, a_max, j_max, resolution=1000, verbose=False):
+    if distance < 2 * s_ramp:
+        # Triangular profile (never reaches v_max)
+        t_ramp = (distance / a_max)**0.5
+        t_total = 2 * t_ramp
+        t_vals = np.linspace(0, t_total, resolution)
+        v_vals = np.zeros_like(t_vals)
+        for i, t in enumerate(t_vals):
+            if t < t_ramp:
+                v_vals[i] = a_max * t
+            else:
+                v_vals[i] = a_max * (t_total - t)
+    else:
+        # Trapezoidal profile
+        t_flat = (distance - 2 * s_ramp) / v_max
+        t_total = 2 * t_ramp + t_flat
+        t_vals = np.linspace(0, t_total, resolution)
+        v_vals = np.zeros_like(t_vals)
+        for i, t in enumerate(t_vals):
+            if t < t_ramp:
+                v_vals[i] = a_max * t
+            elif t < t_ramp + t_flat:
+                v_vals[i] = v_max
+            else:
+                v_vals[i] = a_max * (t_total - t)
+    # Integrate velocity to get position
+    p_vals = np.zeros_like(t_vals)
+    for i in range(1, len(t_vals)):
+        p_vals[i] = p_vals[i-1] + v_vals[i-1] * (t_vals[i] - t_vals[i-1])
+    return t_total, {'type': 'trapezoidal', 't': t_vals, 'v': v_vals, 'p': p_vals, 't_total': t_total}
+
+def calculate_travel_time_SCurve(distance, v_max, a_max, j_max, resolution=1000, verbose=True):
     """
     Calculate the travel time for a motion profile based on distance, maximum velocity, acceleration, and jerk.
 
@@ -60,37 +94,38 @@ def calculate_travel_time_SCurve(distance, v_max, a_max, j_max, resolution=1000,
         print(f"s_accel = {s_accel:.5f} nm, s_total_accel_decel = {s_total_accel_decel:.5f} nm")
 
     if distance < s_total_accel_decel:
+        return calculate_travel_time_trapezoidal(distance, v_max, a_max, resolution=resolution)
         # Triangular motion profile
-        t_j = (3 * distance / (2 * j_max))**(1/3)
-        t_total = 4 * t_j
-        t_vals = np.linspace(0, t_total, resolution)
-        v_vals = np.zeros_like(t_vals)
-        if verbose:
-            print("Triangular Profile")
+        # t_j = (3 * distance / (2 * j_max))**(1/3)
+        # t_total = 4 * t_j
+        # t_vals = np.linspace(0, t_total, resolution)
+        # v_vals = np.zeros_like(t_vals)
+        # if verbose:
+        #     print("Triangular Profile")
 
-        t1 = t_j
-        t2 = 2 * t_j
-        t3 = 3 * t_j
+        # t1 = t_j
+        # t2 = 2 * t_j
+        # t3 = 3 * t_j
 
-        for i, t in enumerate(t_vals):
-            if t < t1:
-                v_vals[i] = 0.5 * j_max * t**2
-            elif t < t2:
-                dt = t - t_j
-                v_vals[i] = (j_max * t_j**2 / 2) + j_max * t_j * dt - j_max * dt**2 / 2
-            elif t < t3:
-                dt = t - 2 * t_j
-                v_vals[i] = (j_max * t_j**2) - j_max * dt**2 / 2
-            else:
-                dt = t - 3 * t_j
-                v_vals[i] = j_max * t_j**2 / 2 - j_max * t_j * dt + j_max * dt**2 / 2
+        # for i, t in enumerate(t_vals):
+        #     if t < t1:
+        #         v_vals[i] = 0.5 * j_max * t**2
+        #     elif t < t2:
+        #         dt = t - t_j
+        #         v_vals[i] = (j_max * t_j**2 / 2) + j_max * t_j * dt - j_max * dt**2 / 2
+        #     elif t < t3:
+        #         dt = t - 2 * t_j
+        #         v_vals[i] = (j_max * t_j**2) - j_max * dt**2 / 2
+        #     else:
+        #         dt = t - 3 * t_j
+        #         v_vals[i] = j_max * t_j**2 / 2 - j_max * t_j * dt + j_max * dt**2 / 2
 
-        return t_total, {
-            'type': 'triangular',
-            't': t_vals,
-            'v': v_vals,
-            't_total': t_total
-        }
+        # return t_total, {
+        #     'type': 'triangular',
+        #     't': t_vals,
+        #     'v': v_vals,
+        #     't_total': t_total
+        # }
 
     else:
         # S-curve profile
@@ -452,6 +487,12 @@ def plot_xy_motion_profile(rectangles, args):
             x[j] = x[j-1] + vx[j-1] * dt_j
             y[j] = y[j-1] + vy[j-1] * dt_j
 
+        # --- Scale position so it ends at the correct target ---
+        if abs(x[-1] - curr[0]) > 1e-9:
+            x = x + (curr[0] - x[-1]) * (t_move / t_move[-1])
+        if abs(y[-1] - curr[1]) > 1e-9:
+            y = y + (curr[1] - y[-1]) * (t_move / t_move[-1])
+
         # Acceleration
         ax = np.zeros_like(t_move)
         ay = np.zeros_like(t_move)
@@ -593,148 +634,70 @@ def plot_xy_motion_profile_scurve(rectangles, args):
     ax_full = np.concatenate(ax_full)
     ay_full = np.concatenate(ay_full)
 
-    # --- Plotting ---
+    # --- Plotting (same as before) ---
     fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-
-    # Position subplot
     axs[0, 0].plot(t_full, x_full, color='blue', label='X Position')
     axs[0, 0].plot(t_full, y_full, color='red', label='Y Position')
     axs[0, 0].set_title("X/Y Position (m)")
     axs[0, 0].set_xlabel("Time (s)")
     axs[0, 0].set_ylabel("Position (m)")
     axs[0, 0].grid(True)
-
-    # Velocity subplot
     axs[0, 1].plot(t_full, vx_full, color='blue', label='X Velocity')
     axs[0, 1].plot(t_full, vy_full, color='red', label='Y Velocity')
     axs[0, 1].set_title("X/Y Velocity (m/s)")
     axs[0, 1].set_xlabel("Time (s)")
     axs[0, 1].set_ylabel("Velocity (m/s)")
     axs[0, 1].grid(True)
-
-    # Acceleration subplot
     axs[1, 0].plot(t_full, ax_full, color='blue', label='X Accel')
     axs[1, 0].plot(t_full, ay_full, color='red', label='Y Accel')
     axs[1, 0].set_title("X/Y Acceleration (m/s²)")
     axs[1, 0].set_xlabel("Time (s)")
     axs[1, 0].set_ylabel("Acceleration (m/s²)")
     axs[1, 0].grid(True)
-
-    # Empty subplot
     axs[1, 1].axis('off')
-
-    # Legends
     for ax in axs.flat:
         handles, labels = ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         if by_label:
             ax.legend(by_label.values(), by_label.keys(), loc="upper right")
-
     plt.tight_layout()
     plt.show()
 
-def plot_motion_profile(rectangles):
-    t_full = []
-    pos_full = []
-    v_full = []
-    a_full = []
-    j_full = []
-    t_offset = 0
+def plot_individual_axis_scurve(rectangles, args):
     axis_keys = [k for k in rectangles[0] if k.startswith('c')]
-    pos_offset = rectangles[0][axis_keys[0]]  # Start at the first FOV center (sync axis)
-    phase_spans = []
-
     for i in range(1, len(rectangles)):
-        axis_keys = [k for k in rectangles[i] if k.startswith('c')]
         prev = np.array([rectangles[i - 1][k] for k in axis_keys])
         curr = np.array([rectangles[i][k] for k in axis_keys])
         delta = curr - prev
 
-        sync = synchronize_multi_axis_motion_SCurve(prev, curr)
-        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
-        params = sync[f'axis_{sync_axis}']
-        move_dist = params['dist']
-        move_jerk = params['jerk']
-        move_accel = params['accel']
-        move_vel = params['vel']
+        t0, prof0 = calculate_travel_time_SCurve(abs(delta[0]), VELOCITY, ACCELERATION, JERK, verbose=True)
+        t1, prof1 = calculate_travel_time_SCurve(abs(delta[1]), VELOCITY, ACCELERATION, JERK, verbose=True)
 
-        direction = np.sign(delta[sync_axis])
+        plt.figure(figsize=(10, 6))
+        plt.subplot(2, 1, 1)
+        plt.plot(prof0['t'], prof0['v'] * np.sign(delta[0]), label='X Velocity', color='blue')
+        plt.plot(prof1['t'], prof1['v'] * np.sign(delta[1]), label='Y Velocity', color='red')
+        plt.title('Individual Axis S-curve Velocity')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Velocity (m/s)')
+        plt.legend()
+        plt.grid(True)
 
-        # ...inside your move phase loop in plot_motion_profile...
-        t_total_move, move_profile = calculate_travel_time_SCurve(
-            move_dist, move_vel, move_accel, move_jerk
-        )
-        t_move = move_profile['t'] + t_offset
-        v_move = move_profile['v'] * direction
+        plt.subplot(2, 1, 2)
+        ax = np.zeros_like(prof0['t'])
+        ay = np.zeros_like(prof1['t'])
+        ax[1:] = np.diff(prof0['v']) / np.diff(prof0['t'])
+        ay[1:] = np.diff(prof1['v']) / np.diff(prof1['t'])
+        plt.plot(prof0['t'], ax, label='X Accel', color='blue')
+        plt.plot(prof1['t'], ay, label='Y Accel', color='red')
+        plt.title('Individual Axis S-curve Acceleration')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Acceleration (m/s²)')
+        plt.legend()
+        plt.grid(True)
 
-        # Integrate velocity for position (sync axis only)
-        pos_move = np.zeros_like(t_move)
-        pos_move[0] = pos_offset
-        for j in range(1, len(t_move)):
-            pos_move[j] = pos_move[j-1] + v_move[j-1] * (t_move[j] - t_move[j-1])
-
-        pos_move = np.maximum(pos_move, 0)
-
-        a_move = np.zeros_like(v_move)
-        a_move[1:] = np.diff(v_move) / np.diff(t_move)
-        j_move = np.zeros_like(a_move)
-        j_move[1:] = np.diff(a_move) / np.diff(t_move)
-
-        t_full.append(t_move)
-        pos_full.append(pos_move)
-        v_full.append(v_move)
-        a_full.append(a_move)
-        j_full.append(j_move)
-        phase_spans.append((t_move[0], t_move[-1], 'move'))
-
-        t_offset = t_move[-1]
-        pos_offset = pos_move[-1]  # Reset to FOV center for next move
-
-
-    t_full = np.concatenate(t_full)
-    pos_full = np.concatenate(pos_full)
-    v_full = np.concatenate(v_full)
-    a_full = np.concatenate(a_full)
-    j_full = np.concatenate(j_full)
-
-    # --- Plotting ---
-    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-    for start, end, phase in phase_spans:
-        color = '#ffeeba' if phase == 'move' else '#d4edda'
-        label = 'Move' if phase == 'move' else 'Scan'
-        for ax in axs.flat:
-            ax.axvspan(start, end, color=color, alpha=0.4, label=label if ax==axs[0,0] else "")
-
-    axs[0, 0].plot(t_full, pos_full, color='orange', label='Sync Axis Position')
-    axs[0, 0].set_title("Position (m)")
-    axs[0, 0].set_xlabel("Time (s)")
-    axs[0, 0].set_ylabel("Position (m)")
-    axs[0, 0].grid(True)
-
-    axs[0, 1].plot(t_full, v_full, color='red')
-    axs[0, 1].set_title("Velocity (m/s)")
-    axs[0, 1].set_xlabel("Time (s)")
-    axs[0, 1].set_ylabel("Velocity (m/s)")
-    axs[0, 1].grid(True)
-
-    axs[1, 0].plot(t_full, a_full, color='blue')
-    axs[1, 0].set_title("Acceleration (m/s²)")
-    axs[1, 0].set_xlabel("Time (s)")
-    axs[1, 0].set_ylabel("Acceleration (m/s²)")
-    axs[1, 0].grid(True)
-
-    axs[1, 1].plot(t_full, j_full, color='green')
-    axs[1, 1].set_title("Jerk (m/s³)")
-    axs[1, 1].set_xlabel("Time (s)")
-    axs[1, 1].set_ylabel("Jerk (m/s³)")
-    axs[1, 1].grid(True)
-
-    handles, labels = axs[0,0].get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    axs[0,0].legend(by_label.values(), by_label.keys(), loc="upper right")
-
-    plt.tight_layout()
-    plt.show()
+        plt.tight_layout()
+        plt.show()
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -743,7 +706,7 @@ def parse_args():
     parser.add_argument('--acceleration', type=float, default=5, help='Acceleration (m/s^2)')
     parser.add_argument('--velocity', type=float, default=1, help='Velocity (m/s)')
     parser.add_argument('--jerk', type=float, default=100, help='Jerk (m/s^3)')
-    parser.add_argument('--radius', type=float, default=0.10577, help='Radius (m)')
+    parser.add_argument('--radius', type=float, default=0.1, help='Radius (m)')
     parser.add_argument('--expo', type=float, default=0.05, help='Exposure time (s)')
     parser.add_argument('--proj', type=int, default=32, help='Number of projections')
     parser.add_argument('--fov', type=str, default='ScanTests.csv', help='FOV CSV file')
@@ -758,6 +721,6 @@ if __name__ == "__main__":
 
     CycleTime = args.expo * args.proj
     rectangles = load_FOV_from_csv(args.fov)
-    plot_xy_motion_profile(rectangles, args)
+    # plot_xy_motion_profile(rectangles, args)
     plot_xy_motion_profile_scurve(rectangles, args)
-    plot_motion_profile(rectangles)
+    plot_individual_axis_scurve(rectangles, args)
