@@ -17,6 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import csv
+from scipy.optimize import fsolve
 
 # PARAMETERS
 PI = np.pi
@@ -67,124 +68,111 @@ def calculate_travel_time_trapezoidal(distance, v_max, a_max, resolution=1000):
     return t_total, {'type': 'trapezoidal', 't': t_vals, 'v': v_vals, 'p': p_vals, 't_total': t_total}
 
 def calculate_travel_time_SCurve(distance, v_max, a_max, j_max, resolution=1000, verbose=True):
-    """
-    Calculate the travel time for a motion profile based on distance, maximum velocity, acceleration, and jerk.
+    # Calculate time to max acceleration
+    t_j = a_max / j_max
+    # Time at constant acceleration (if any)
+    t_const_a = (v_max - a_max * t_j) / a_max
+    # Distance covered during accel+decel (no cruise)
+    s_accel = (a_max * t_j**2) + (a_max * t_const_a * t_j) + (0.5 * a_max * t_const_a**2) / 1
+    s_total_accel_decel = 2 * (1/3 * j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2)
 
-    This function computes the time required to travel a specified distance either using a triangular or S-curve motion profile.
-    It returns the total travel time and optionally the time and velocity profiles for each phase.
-
-    Args:
-        distance (float): Distance to travel in meters.
-        v_max (float): Maximum velocity in m/s.
-        a_max (float): Maximum acceleration in m/s².
-        j_max (float): Maximum jerk in m/s³.
-        resolution (int): Number of points in the time profile.
-        verbose (bool): If True, prints detailed information about the calculation.
-
-    Returns:
-        tuple: Total travel time in seconds and a dictionary containing the motion profile type, time values, velocity values, and total time.
-        
-    """
-    t_j = a_max / j_max  # time to reach max acceleration
-    t_const_a = (v_max - a_max * t_j) / a_max  # time at constant acceleration
-    s_accel = 1/3 * j_max * t_j**3 + a_max * t_const_a * t_j + 0.5 * a_max * t_const_a**2
-    s_total_accel_decel = 2 * s_accel
     if verbose:
         print(f"t_j = {t_j:.5f} s, t_const_a = {t_const_a:.5f} s")
-        print(f"s_accel = {s_accel:.5f} nm, s_total_accel_decel = {s_total_accel_decel:.5f} nm")
+        print(f"s_total_accel_decel = {s_total_accel_decel:.5f} m, distance = {distance:.5f} m")
 
-    if distance < s_total_accel_decel:
-        return calculate_travel_time_trapezoidal(distance, v_max, a_max, resolution=resolution)
-        # Triangular motion profile
-        # t_j = (3 * distance / (2 * j_max))**(1/3)
-        # t_total = 4 * t_j
-        # t_vals = np.linspace(0, t_total, resolution)
-        # v_vals = np.zeros_like(t_vals)
-        # if verbose:
-        #     print("Triangular Profile")
-
-        # t1 = t_j
-        # t2 = 2 * t_j
-        # t3 = 3 * t_j
-
-        # for i, t in enumerate(t_vals):
-        #     if t < t1:
-        #         v_vals[i] = 0.5 * j_max * t**2
-        #     elif t < t2:
-        #         dt = t - t_j
-        #         v_vals[i] = (j_max * t_j**2 / 2) + j_max * t_j * dt - j_max * dt**2 / 2
-        #     elif t < t3:
-        #         dt = t - 2 * t_j
-        #         v_vals[i] = (j_max * t_j**2) - j_max * dt**2 / 2
-        #     else:
-        #         dt = t - 3 * t_j
-        #         v_vals[i] = j_max * t_j**2 / 2 - j_max * t_j * dt + j_max * dt**2 / 2
-
-        # return t_total, {
-        #     'type': 'triangular',
-        #     't': t_vals,
-        #     'v': v_vals,
-        #     't_total': t_total
-        # }
-
-    else:
-        # S-curve profile
+    if distance >= s_total_accel_decel:
+        # Full S-curve with cruise
         s_cruise = distance - s_total_accel_decel
         t_cruise = s_cruise / v_max
-        if verbose:
-            print(f"t_cruise = {t_cruise:.5f} s")
         t_total = 2 * t_j + t_const_a + t_cruise + 2 * t_j + t_const_a
         t_vals = np.linspace(0, t_total, resolution)
         v_vals = np.zeros_like(t_vals)
-        if verbose:
-            print("S-Curve Profile")
-
-        # Define phase boundaries
-        t1 = t_j
-        t2 = t1 + t_const_a
-        t3 = t2 + t_j
-        t4 = t3 + t_cruise
-        t5 = t4 + t_j
-        t6 = t5 + t_const_a
-        t7 = t6 + t_j
-        if verbose:
-            print(f"t1 = {t1:.5f} s, t2 = {t2:.5f} s, t3 = {t3:.5f} s, t4 = {t4:.5f} s")
-            print(f"t5 = {t5:.5f} s, t6 = {t6:.5f} s, t7 = {t7:.5f} s")
-
         for i, t in enumerate(t_vals):
-            if t < t1:
-                # Phase 1: Jerk up
+            if t < t_j:
                 v_vals[i] = 0.5 * j_max * t**2
-            elif t < t2:
-                # Phase 2: Constant acceleration
-                dt = t - t1
+            elif t < t_j + t_const_a:
+                dt = t - t_j
                 v_vals[i] = 0.5 * j_max * t_j**2 + a_max * dt
-            elif t < t3:
-                # Phase 3: Jerk down
-                dt = t - t2
+            elif t < 2 * t_j + t_const_a:
+                dt = t - (t_j + t_const_a)
                 v_vals[i] = 0.5 * j_max * t_j**2 + a_max * t_const_a + a_max * dt - 0.5 * j_max * dt**2
-            elif t < t4:
-                # Phase 4: Cruise
+            elif t < 2 * t_j + t_const_a + t_cruise:
                 v_vals[i] = v_max
-            elif t < t5:
-                # Phase 5: Jerk down (decel start)
-                dt = t - t4
+            elif t < 3 * t_j + t_const_a + t_cruise:
+                dt = t - (2 * t_j + t_const_a + t_cruise)
                 v_vals[i] = v_max - 0.5 * j_max * dt**2
-            elif t < t6:
-                # Phase 6: Constant deceleration
-                dt = t - t5
+            elif t < 3 * t_j + 2 * t_const_a + t_cruise:
+                dt = t - (3 * t_j + t_const_a + t_cruise)
                 v_vals[i] = v_max - 0.5 * j_max * t_j**2 - a_max * dt
             else:
-                # Phase 7: Jerk up (decel end)
-                dt = t - t6
+                dt = t - (3 * t_j + 2 * t_const_a + t_cruise)
                 v_vals[i] = v_max - 0.5 * j_max * t_j**2 - a_max * t_const_a - a_max * dt + 0.5 * j_max * dt**2
+    # Compute minimum distance to reach a_max (no cruise, but with constant accel phase)
+    t_j = a_max / j_max
+    v_lim = a_max * t_j
+    s_lim = 2 * (1/3 * j_max * t_j**3 + 0.5 * a_max * t_j**2)
 
-        return t_total, {
-            'type': 's-curve',
-            't': t_vals,
-            'v': v_vals,
-            't_total': t_total
-        }
+    if distance < s_lim:
+        # Too short to reach a_max: triangular S-curve (jerk up, jerk down)
+        t_j = (distance / (4/3 * j_max))**(1/3)
+        v_peak = j_max * t_j**2
+        t_total = 4 * t_j
+        t_vals = np.linspace(0, t_total, resolution)
+        v_vals = np.zeros_like(t_vals)
+        for i, t in enumerate(t_vals):
+            if t < t_j:
+                v_vals[i] = 0.5 * j_max * t**2
+            elif t < 2 * t_j:
+                dt = t - t_j
+                v_vals[i] = 0.5 * j_max * t_j**2 + j_max * t_j * dt - 0.5 * j_max * dt**2
+            elif t < 3 * t_j:
+                dt = t - 2 * t_j
+                v_vals[i] = v_peak - 0.5 * j_max * dt**2
+            else:
+                dt = t - 3 * t_j
+                v_vals[i] = v_peak - j_max * t_j * dt + 0.5 * j_max * dt**2
+    else:
+        # S-curve with constant accel phase, but no cruise
+        # Solve for t_const_a such that total area = distance
+        # distance = 2*(1/3*j_max*t_j**3 + a_max*t_const_a*t_j + 0.5*a_max*t_const_a**2)
+        # Let t_const_a be unknown, solve cubic equation for t_const_a
+        def eqn(t_const_a):
+            return 2*(1/3*j_max*t_j**3 + a_max*t_const_a*t_j + 0.5*a_max*t_const_a**2) - distance
+
+        t_const_a_guess = 0
+        t_const_a = float(fsolve(eqn, t_const_a_guess)[0])
+        v_peak = 0.5 * j_max * t_j**2 + a_max * t_const_a  # <-- Add this line!
+        t_total = 2 * t_j + 2 * t_const_a
+        t_vals = np.linspace(0, t_total, resolution)
+        v_vals = np.zeros_like(t_vals)
+        for i, t in enumerate(t_vals):
+            if t < t_j:
+                v_vals[i] = 0.5 * j_max * t**2
+            elif t < t_j + t_const_a:
+                dt = t - t_j
+                v_vals[i] = 0.5 * j_max * t_j**2 + a_max * dt
+            elif t < 2 * t_j + t_const_a:
+                dt = t - (t_j + t_const_a)
+                v_vals[i] = 0.5 * j_max * t_j**2 + a_max * t_const_a + a_max * dt - 0.5 * j_max * dt**2
+            else:
+                dt = t - (2 * t_j + t_const_a)
+                v_vals[i] = 0.5 * j_max * t_j**2 + a_max * t_const_a - a_max * dt + 0.5 * j_max * dt**2
+        if verbose:
+            print("Short move: S-curve with no cruise, v_peak = {:.5f} m/s".format(v_peak))
+            print("t_j = {:.5f} s, t_total = {:.5f} s".format(t_j, t_total))
+
+    # Integrate velocity to get position
+    p_vals = np.zeros_like(t_vals)
+    for i in range(1, len(t_vals)):
+        p_vals[i] = p_vals[i-1] + v_vals[i-1] * (t_vals[i] - t_vals[i-1])
+
+    return t_total, {
+        'type': 's-curve',
+        't': t_vals,
+        'v': v_vals,
+        'p': p_vals,
+        't_total': t_total
+    }
 
 def calculate_travel_time(distance, v_max, a_max, j_max, resolution=1000, verbose=False):
     """
@@ -519,6 +507,12 @@ def plot_xy_motion_profile(rectangles, args):
     ax_full = np.concatenate(ax_full)
     ay_full = np.concatenate(ay_full)
 
+    # --- Fix: Set last velocity and acceleration samples to zero ---
+    vx_full[-1] = 0
+    vy_full[-1] = 0
+    ax_full[-1] = 0
+    ay_full[-1] = 0
+
     # --- Plotting ---
     fig, axs = plt.subplots(2, 2, figsize=(12, 8))
 
@@ -560,57 +554,51 @@ def plot_xy_motion_profile(rectangles, args):
     plt.show()   
 
 def plot_xy_motion_profile_scurve(rectangles, args):
+    import numpy as np
+    import matplotlib.pyplot as plt
 
     axis_keys = [k for k in rectangles[0] if k.startswith('c')]
-    curr_pos = np.array([rectangles[0][axis_keys[0]], rectangles[0][axis_keys[1]]])
-
     t_full, x_full, y_full, vx_full, vy_full, ax_full, ay_full = [], [], [], [], [], [], []
 
     for i in range(1, len(rectangles)):
-        prev = np.array([rectangles[i - 1][k] for k in axis_keys])
+        prev = np.array([rectangles[i-1][k] for k in axis_keys])
         curr = np.array([rectangles[i][k] for k in axis_keys])
         delta = curr - prev
 
-                # --- Use multi-axis sync to get sync time and axis ---
-        sync = synchronize_multi_axis_motion(prev, curr)
-        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
+        # --- Multi-axis S-curve synchronization ---
+        sync = synchronize_multi_axis_motion_SCurve(prev, curr)
         t_sync = sync['t_sync']
-
-        # Generate S-curve profile for sync axis (with its own limits)
+        sync_axis = int(sync['sync_axis'].replace('Axis', ''))
         sync_params = sync[f'axis_{sync_axis}']
         _, sync_prof = calculate_travel_time_SCurve(
-            sync_params['dist'], sync_params['vel'], sync_params['accel'], sync_params['jerk']
+            sync_params['dist'], sync_params['vel'], sync_params['accel'], sync_params['jerk'], verbose=False
         )
         t_sync_base = sync_prof['t']
-        v_sync = sync_prof['v'] * np.sign(delta[sync_axis])
 
-        # Generate S-curve profile for non-sync axis (with its own limits)
-        non_sync_axis = 1 - sync_axis
-        non_sync_params = sync[f'axis_{non_sync_axis}']
-        _, non_sync_prof = calculate_travel_time_SCurve(
-            non_sync_params['dist'], VELOCITY, ACCELERATION, JERK
-        )
-        v_non_sync = np.interp(t_sync_base, non_sync_prof['t'], non_sync_prof['v']) * np.sign(delta[non_sync_axis])
-
-        # Assign vx, vy according to which is sync axis
-        if sync_axis == 0:
-            vx = v_sync
-            vy = v_non_sync
-        else:
-            vx = v_non_sync
-            vy = v_sync
-
-        # Integrate for position
+        vx = np.zeros_like(t_sync_base)
+        vy = np.zeros_like(t_sync_base)
         x = np.zeros_like(t_sync_base)
         y = np.zeros_like(t_sync_base)
-        x[0] = curr_pos[0]
-        y[0] = curr_pos[1]
-        for j in range(1, len(t_sync_base)):
-            dt_j = t_sync_base[j] - t_sync_base[j-1]
-            x[j] = x[j-1] + vx[j-1] * dt_j
-            y[j] = y[j-1] + vy[j-1] * dt_j
 
-        # Acceleration
+        for axis, params in enumerate([sync['axis_0'], sync['axis_1']]):
+            dist = params['dist']
+            if dist == 0:
+                v_stretch = np.zeros_like(t_sync_base)
+                p_stretch = np.zeros_like(t_sync_base)
+            else:
+                # 1. Generate S-curve profile for this axis (with its own time base)
+                _, prof = calculate_travel_time_SCurve(dist, VELOCITY, ACCELERATION, JERK, verbose=False)
+                # 2. Stretch the time base to match the sync axis duration
+                t_stretch = prof['t'] * (t_sync_base[-1] / prof['t'][-1])
+                v_stretch = np.interp(t_sync_base, t_stretch, prof['v']) * np.sign(delta[axis])
+                p_stretch = np.interp(t_sync_base, t_stretch, prof['p']) * np.sign(delta[axis])
+            if axis == 0:
+                vx = v_stretch
+                x = p_stretch + prev[0]
+            else:
+                vy = v_stretch
+                y = p_stretch + prev[1]
+
         ax = np.zeros_like(t_sync_base)
         ay = np.zeros_like(t_sync_base)
         ax[1:] = np.diff(vx) / np.diff(t_sync_base)
@@ -624,8 +612,6 @@ def plot_xy_motion_profile_scurve(rectangles, args):
         ax_full.append(ax)
         ay_full.append(ay)
 
-        curr_pos = curr.copy()
-
     t_full = np.concatenate(t_full)
     x_full = np.concatenate(x_full)
     y_full = np.concatenate(y_full)
@@ -634,7 +620,6 @@ def plot_xy_motion_profile_scurve(rectangles, args):
     ax_full = np.concatenate(ax_full)
     ay_full = np.concatenate(ay_full)
 
-    # --- Plotting (same as before) ---
     fig, axs = plt.subplots(2, 2, figsize=(12, 8))
     axs[0, 0].plot(t_full, x_full, color='blue', label='X Position')
     axs[0, 0].plot(t_full, y_full, color='red', label='Y Position')
@@ -663,6 +648,7 @@ def plot_xy_motion_profile_scurve(rectangles, args):
     plt.tight_layout()
     plt.show()
 
+    
 def plot_individual_axis_scurve(rectangles, args):
     axis_keys = [k for k in rectangles[0] if k.startswith('c')]
     for i in range(1, len(rectangles)):

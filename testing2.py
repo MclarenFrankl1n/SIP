@@ -134,6 +134,8 @@ def calculate_scan_time(radius, verbose=False, return_profile=False, plot_xy=Fal
     pos = np.concatenate([pos_up[:-1], pos_cruise[:-1], pos_down])
     jerk = np.concatenate([jerk_up[:-1], jerk_cruise[:-1], jerk_down])
 
+    print(pos[0], pos[-1])
+
     if plot_xy:
         degrees = np.degrees(pos / radius)
         x_pos = radius * np.cos(np.radians(degrees))
@@ -634,6 +636,7 @@ def plot_xy_motion_profile(rectangles, args):
         # # --- Scan phase after buffer ---
         # scan_time, t_scan, v_scan, a_scan, pos_scan, ramp_distance = calculate_scan_time(RADIUS, return_profile=True)
         # t_scan = t_scan + t_offset
+        # print("ramp_distance = {:.5f} m".format(ramp_distance))
 
         # # Circular arc: theta in radians
         # theta = (pos_scan - ramp_distance) / RADIUS  # Start at negative offset
@@ -644,6 +647,15 @@ def plot_xy_motion_profile(rectangles, args):
         # vy_scan = v_scan * np.cos(theta)
         # ax_scan = -a_scan * np.sin(theta)
         # ay_scan = a_scan * np.cos(theta)
+
+        # theta0 = -ramp_distance / RADIUS
+        # theta1 = (2 * np.pi * RADIUS + ramp_distance) / RADIUS
+        # x0 = curr[0] + RADIUS * np.cos(theta0)
+        # y0 = curr[1] + RADIUS * np.sin(theta0)
+        # x1 = curr[0] + RADIUS * np.cos(theta1)
+        # y1 = curr[1] + RADIUS * np.sin(theta1)
+        # print(f"Initial coordinate: ({x0:.5f}, {y0:.5f})")
+        # print(f"Last coordinate:    ({x1:.5f}, {y1:.5f})")
 
         # t_full.append(t_scan)
         # x_full.append(x_scan)
@@ -886,6 +898,6 @@ if __name__ == "__main__":
 
     CycleTime = args.expo * args.proj
     rectangles = load_FOV_from_csv(args.fov)
-    # scan_time, t_scan, v_scan, a_scan, pos_scan = calculate_scan_time(RADIUS, return_profile=True, plot_xy=True)
-    total_time, segment_times = calculate_board_movement_time(rectangles)
+    # scan_time, t_scan, v_scan, a_scan, pos_scan, ramp = calculate_scan_time(RADIUS, return_profile=True, plot_xy=True)
+    # total_time, segment_times = calculate_board_movement_time(rectangles)
     plot_xy_motion_profile(rectangles, args)
